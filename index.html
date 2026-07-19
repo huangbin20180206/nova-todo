@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nova Todo · 智能待办</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-orb bg-orb--a" aria-hidden="true"></div>
+  <div class="bg-orb bg-orb--b" aria-hidden="true"></div>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand__mark">N</div>
+        <div>
+          <p class="brand__eyebrow">Nova Todo</p>
+          <h1>智能待办舱</h1>
+        </div>
+      </div>
+
+      <nav class="side-nav" aria-label="视图">
+        <button class="nav-item is-active" data-view="all" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">🗂️</span><span>全部任务</span></span><span class="nav-count" data-count="all">0</span>
+        </button>
+        <button class="nav-item" data-view="active" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">🚀</span><span>进行中</span></span><span class="nav-count" data-count="active">0</span>
+        </button>
+        <button class="nav-item" data-view="completed" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">✅</span><span>已完成</span></span><span class="nav-count" data-count="completed">0</span>
+        </button>
+        <button class="nav-item" data-view="today" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">📅</span><span>今日到期</span></span><span class="nav-count" data-count="today">0</span>
+        </button>
+        <button class="nav-item" data-view="overdue" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">⏰</span><span>已逾期</span></span><span class="nav-count" data-count="overdue">0</span>
+        </button>
+        <button class="nav-item" data-view="scheduled" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">🔁</span><span>重复任务</span></span><span class="nav-count" data-count="scheduled">0</span>
+        </button>
+        <button class="nav-item" data-view="archived" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">📦</span><span>归档</span></span><span class="nav-count" data-count="archived">0</span>
+        </button>
+      </nav>
+
+      <section class="side-card">
+        <div class="side-card__head">
+          <h2>清单</h2>
+          <button id="btn-add-list" class="link-btn" type="button">+ 新建</button>
+        </div>
+        <div id="list-nav" class="list-nav" aria-label="清单列表"></div>
+      </section>
+      <section class="side-card">
+        <div class="side-card__head">
+          <h2>标签</h2>
+        </div>
+        <div id="tag-cloud" class="tag-cloud"></div>
+      </section>
+
+      <section class="side-card side-card--stats">
+        <h2>状态雷达</h2>
+        <div class="stat-grid">
+          <div class="stat-pill">
+            <strong id="stat-completion">0%</strong>
+            <span>完成率</span>
+          </div>
+          <div class="stat-pill">
+            <strong id="stat-high">0</strong>
+            <span>高优/紧急</span>
+          </div>
+          <div class="stat-pill">
+            <strong id="stat-due-soon">0</strong>
+            <span>3 日内到期</span>
+          </div>
+          <div class="stat-pill">
+            <strong id="stat-repeating">0</strong>
+            <span>重复任务</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="sidebar__footer">
+        <button id="btn-enable-notify" class="ghost-btn" type="button">开启浏览器提醒</button>
+        <button id="btn-share-pack" class="ghost-btn" type="button">导出分享包</button>
+        <button id="btn-export" class="ghost-btn" type="button">导出 JSON</button>
+        <button id="btn-import" class="ghost-btn" type="button">导入 JSON</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden />
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="search-box">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="search-input" type="search" placeholder="搜索标题、备注、标签…" autocomplete="off" />
+        </div>
+        <div class="topbar__actions">
+          <label class="select-wrap">
+            <span class="sr-only">排序</span>
+            <select id="sort-select">
+              <option value="manual">⠿ 手动排序</option>
+              <option value="created_desc">🆕 最新创建</option>
+              <option value="due_asc">📅 截止日期</option>
+              <option value="priority_desc">⚡ 优先级</option>
+              <option value="alpha_asc">🔤 标题 A-Z</option>
+            </select>
+          </label>
+          <button id="theme-toggle" class="icon-btn" type="button" title="切换主题" aria-label="切换主题">◐</button>
+          <button id="btn-clear-completed" class="ghost-btn" type="button">清理已完成</button>
+          <button id="btn-new" class="primary-btn" type="button">+ 新建任务</button>
+        </div>
+      </header>
+
+      <section class="composer-panel" aria-label="快速创建">
+        <form id="quick-form" class="quick-form" novalidate>
+          <input id="quick-input" type="text" maxlength="200" placeholder="快速添加：写下任务，Enter 创建" autocomplete="off" />
+          <select id="quick-list" aria-label="清单"></select>
+          <select id="quick-priority" aria-label="优先级">
+            <option value="medium">🔵 中优先级</option>
+            <option value="low">🟢 低</option>
+            <option value="high">🟠 高</option>
+            <option value="urgent">🔴 紧急</option>
+          </select>
+          <button class="primary-btn" type="submit">添加</button>
+        </form>
+        <p id="form-error" class="form-error" role="alert" hidden></p>
+      </section>
+
+      <section id="focus-panel" class="focus-panel" aria-label="今日焦点" hidden>
+        <div class="focus-panel__head">
+          <div>
+            <p class="eyebrow">Today Focus</p>
+            <h2>今日焦点</h2>
+          </div>
+          <button id="btn-focus-today" class="ghost-btn" type="button">查看今日视图</button>
+        </div>
+        <div id="focus-list" class="focus-list"></div>
+        <p id="focus-empty" class="focus-empty muted">今天很清爽，没有紧急或到期事项。</p>
+      </section>
+      <section class="list-header">
+        <div>
+          <h2 id="view-title">全部任务</h2>
+          <p id="view-subtitle" class="muted">本地 IndexedDB · 可扩展数据层</p>
+        </div>
+        <p id="result-meta" class="muted">0 项</p>
+      </section>
+      <section id="active-filters" class="active-filters" hidden>
+        <div id="active-filters-list" class="active-filters__list"></div>
+        <button id="btn-clear-filters" class="ghost-btn" type="button">清除筛选</button>
+      </section>
+
+      <section id="todo-board" class="todo-board" aria-live="polite"></section>
+      <section id="empty-state" class="empty-state" hidden>
+        <div class="empty-state__card">
+          <div class="empty-state__icon" id="empty-icon" aria-hidden="true">🛰️</div>
+          <p class="eyebrow" id="empty-eyebrow">Empty Orbit</p>
+          <h3 id="empty-title">这里还很安静</h3>
+          <p id="empty-text">创建第一条任务，或切换视图看看别的宇宙角落。</p>
+          <button id="empty-action" class="primary-btn" type="button">新建任务</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="editor-drawer" class="editor-drawer" aria-hidden="true" hidden>
+    <div class="editor-drawer__head">
+      <div>
+        <p class="eyebrow">Task Studio</p>
+        <h2 id="editor-title">编辑任务</h2>
+      </div>
+      <button id="editor-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </div>
+    <form id="editor-form" class="editor-form">
+      <input type="hidden" id="editor-id" />
+      <label>
+        <span>标题</span>
+        <input id="editor-text" type="text" maxlength="200" required />
+      </label>
+      <label>
+        <span>备注</span>
+        <textarea id="editor-notes" rows="5" maxlength="2000" placeholder="补充细节、链接、验收标准…"></textarea>
+      </label>
+      <div class="editor-grid">
+        <label>
+          <span>所属清单</span>
+          <select id="editor-list"></select>
+        </label>
+        <label>
+          <span>优先级</span>
+          <select id="editor-priority">
+            <option value="low">🟢 低</option>
+            <option value="medium">🔵 中</option>
+            <option value="high">🟠 高</option>
+            <option value="urgent">🔴 紧急</option>
+          </select>
+        </label>
+      </div>
+      <div class="editor-grid">
+        <label>
+          <span>截止日期</span>
+          <input id="editor-due" type="date" />
+        </label>
+        <label>
+          <span>重复</span>
+          <select id="editor-repeat">
+            <option value="none">🚫 不重复</option>
+            <option value="daily">🔁 每天</option>
+            <option value="weekly">📅 每周</option>
+            <option value="monthly">🗓️ 每月</option>
+          </select>
+        </label>
+      </div>
+      <div class="editor-grid">
+        <label class="check-field">
+          <span>到期提醒</span>
+          <label class="switch">
+            <input id="editor-remind-enabled" type="checkbox" />
+            <span>开启提醒</span>
+          </label>
+        </label>
+        <label>
+          <span>提醒时间</span>
+          <input id="editor-remind-time" type="time" value="09:00" />
+        </label>
+      </div>
+      <div class="field-block">
+        <div class="field-block__head">
+          <span>标签</span>
+          <button id="btn-open-tag-manager" class="link-btn" type="button">管理标签库</button>
+        </div>
+        <div id="editor-selected-tags" class="selected-tags" aria-live="polite"></div>
+        <div class="tag-picker-row">
+          <label class="sr-only" for="editor-tag-select">选择标签</label>
+          <select id="editor-tag-select">
+            <option value="">🏷️ 选择已有标签…</option>
+          </select>
+          <button id="editor-tag-add" class="ghost-btn" type="button">添加</button>
+        </div>
+        <div class="tag-picker-row">
+          <label class="sr-only" for="editor-tag-new">新建标签</label>
+          <input id="editor-tag-new" type="text" maxlength="20" placeholder="输入新标签名" autocomplete="off" />
+          <button id="editor-tag-create" class="ghost-btn" type="button">新建并添加</button>
+        </div>
+        <p class="field-hint">可从标签库下拉选择，也可新建后自动加入标签库。</p>
+      </div>
+      <div class="editor-actions">
+        <button id="editor-archive" class="ghost-btn" type="button">归档</button>
+        <button id="editor-delete" class="danger-btn" type="button">删除</button>
+        <button class="primary-btn" type="submit">保存</button>
+      </div>
+    </form>
+  </aside>
+
+    <div id="tag-manager-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="tag-manager" class="tag-manager" hidden aria-hidden="true">
+    <div class="editor-drawer__head">
+      <div>
+        <p class="eyebrow">Tag Library</p>
+        <h2>管理标签库</h2>
+      </div>
+      <button id="tag-manager-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </div>
+    <form id="tag-manager-create" class="tag-picker-row">
+      <input id="tag-manager-input" type="text" maxlength="20" placeholder="新增标签到库" autocomplete="off" />
+      <button class="primary-btn" type="submit">新增</button>
+    </form>
+    <div id="tag-manager-list" class="tag-manager-list"></div>
+    <p class="field-hint">删除标签库中的标签时，会同时从相关任务中移除该标签。</p>
+  </aside>
+<div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="./js/db.js"></script>
+  <script src="./js/store.js"></script>
+  <script src="./js/ui.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>
+
+
+
+
+
+
