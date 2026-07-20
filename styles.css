@@ -952,3 +952,83 @@ kbd {
     max-width: 100vw !important;
   }
 }
+
+
+/* ===== Wave2: templates, search, reminders ===== */
+.recent-searches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.recent-search-chip {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.recent-search-chip:hover { border-color: color-mix(in srgb, var(--primary) 50%, var(--line)); }
+.todo-card__title mark, .todo-card__notes mark {
+  background: color-mix(in srgb, #fbbf24 45%, transparent);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.reminder-panel, .template-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+.reminder-panel {
+  margin: 0 0 12px;
+}
+.reminder-panel__head, .template-panel {
+  display: grid;
+  gap: 8px;
+}
+.reminder-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.reminder-list, .template-list {
+  display: grid;
+  gap: 8px;
+}
+.reminder-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: inherit;
+  border-radius: 14px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.reminder-item.is-overdue { border-color: color-mix(in srgb, #fb7185 50%, var(--line)); }
+.reminder-item.is-today { border-color: color-mix(in srgb, #fbbf24 50%, var(--line)); }
+.reminder-item__main { display: grid; gap: 2px; min-width: 0; }
+.reminder-item__main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.template-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+}
+.template-row__meta { display: grid; gap: 2px; min-width: 0; }
+.template-row__meta strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-box { position: relative; }
+@media (max-width: 900px) {
+  .reminder-panel, .template-panel { margin-left: 0; }
+  .template-row { grid-template-columns: 1fr; }
+}

@@ -139,6 +139,14 @@
       btnBackupNow: $("#btn-backup-now"),
       btnBackupRestore: $("#btn-backup-restore"),
       btnBackupDownload: $("#btn-backup-download"),
+      reminderPanel: $("#reminder-panel"),
+      reminderList: $("#reminder-list"),
+      reminderEmpty: $("#reminder-empty"),
+      btnReminderRefresh: $("#btn-reminder-refresh"),
+      templatePanel: $("#template-panel"),
+      templateList: $("#template-list"),
+      btnSaveTemplate: $("#btn-save-template"),
+      recentSearches: $("#recent-searches"),
       btnClearCompleted: $("#btn-clear-completed"),
       btnExport: $("#btn-export"),
       btnImport: $("#btn-import"),
@@ -376,6 +384,119 @@
         });
         if (current) els.bulkTag.value = current;
       }
+    }
+
+    function highlightText(text, keyword) {
+      const raw = String(text || "");
+      const q = String(keyword || "").trim();
+      if (!q) return escapeHtml(raw);
+      const lower = raw.toLowerCase();
+      const needle = q.toLowerCase();
+      let out = "";
+      let i = 0;
+      while (i < raw.length) {
+        const hit = lower.indexOf(needle, i);
+        if (hit === -1) { out += escapeHtml(raw.slice(i)); break; }
+        out += escapeHtml(raw.slice(i, hit)) + '<mark>' + escapeHtml(raw.slice(hit, hit + needle.length)) + '</mark>';
+        i = hit + needle.length;
+      }
+      return out;
+    }
+    function renderRecentSearches(snapshot) {
+      if (!els.recentSearches) return;
+      const items = (snapshot.recentSearches || snapshot.settings.recentSearches || []).slice(0, 8);
+      if (!items.length) { els.recentSearches.hidden = true; els.recentSearches.innerHTML = ""; return; }
+      els.recentSearches.hidden = false;
+      els.recentSearches.innerHTML = "";
+      items.forEach(function (q) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "recent-search-chip";
+        btn.textContent = q;
+        btn.addEventListener("click", function () {
+          store.setSettings({ search: q });
+          store.pushRecentSearch(q);
+        });
+        els.recentSearches.appendChild(btn);
+      });
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "link-btn";
+      clear.textContent = "清空";
+      clear.addEventListener("click", function () { store.clearRecentSearches(); });
+      els.recentSearches.appendChild(clear);
+    }
+    function renderReminderPanel(snapshot) {
+      if (!els.reminderPanel) return;
+      const list = snapshot.upcomingReminders || [];
+      const show = true;
+      els.reminderPanel.hidden = list.length === 0 && snapshot.settings.view !== "today";
+      // always show if any reminders in next 7 days, or if notifications enabled
+      if (list.length) els.reminderPanel.hidden = false;
+      if (!els.reminderList) return;
+      els.reminderList.innerHTML = "";
+      if (!list.length) {
+        if (els.reminderEmpty) els.reminderEmpty.hidden = false;
+        return;
+      }
+      if (els.reminderEmpty) els.reminderEmpty.hidden = true;
+      const today = store.todayKey();
+      list.forEach(function (todo) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "reminder-item" + (todo.dueDate < today ? " is-overdue" : (todo.dueDate === today ? " is-today" : ""));
+        const dueLabel = todo.dueDate < today ? "已到期" : (todo.dueDate === today ? "今天" : todo.dueDate);
+        row.innerHTML = '<span class="reminder-item__main"><strong>' + escapeHtml(todo.text) + '</strong><span class="muted">' + escapeHtml(dueLabel + " · " + (todo.remindTime || "09:00")) + '</span></span><span class="reminder-item__badge">🔔</span>';
+        row.addEventListener("click", function () { openEditor(todo); });
+        els.reminderList.appendChild(row);
+      });
+    }
+    function renderTemplates(snapshot) {
+      if (!els.templateList) return;
+      const list = snapshot.templates || [];
+      els.templateList.innerHTML = "";
+      if (!list.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.style.margin = "0";
+        empty.style.fontSize = "12px";
+        empty.textContent = "还没有模板。可把常用任务存成模板。";
+        els.templateList.appendChild(empty);
+        return;
+      }
+      list.forEach(function (tpl) {
+        const row = document.createElement("div");
+        row.className = "template-row";
+        const applyBtn = document.createElement("button");
+        applyBtn.type = "button";
+        applyBtn.className = "ghost-btn";
+        applyBtn.textContent = "套用";
+        applyBtn.title = tpl.name || tpl.text;
+        applyBtn.addEventListener("click", function () {
+          store.applyTemplate(tpl.id).then(function (result) {
+            if (!result.ok) toast(result.error || "套用失败", "error");
+            else toast("已从模板创建：" + (tpl.name || tpl.text));
+          });
+        });
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "icon-btn";
+        delBtn.textContent = "✕";
+        delBtn.title = "删除模板";
+        delBtn.addEventListener("click", function () {
+          if (!confirm("删除模板「" + (tpl.name || tpl.text) + "」？")) return;
+          store.deleteTemplate(tpl.id).then(function (result) {
+            if (result.ok) toast("模板已删除");
+          });
+        });
+        const meta = document.createElement("div");
+        meta.className = "template-row__meta";
+        meta.innerHTML = "<strong>" + escapeHtml(tpl.name || tpl.text) + "</strong><span class=\"muted\">" + escapeHtml((tpl.priority || "medium") + (tpl.tags && tpl.tags.length ? " · " + tpl.tags.join(",") : "")) + "</span>";
+        row.appendChild(meta);
+        row.appendChild(applyBtn);
+        row.appendChild(delBtn);
+        els.templateList.appendChild(row);
+      });
     }
     function openEditor(todo) {
       els.editorId.value = todo ? todo.id : "";
@@ -771,7 +892,9 @@
       priorityDot.textContent = priorityIcon(todo.priority);
       const title = document.createElement("h3");
       title.className = "todo-card__title";
-      title.textContent = todo.text;
+      const kw = (snapshot.settings && snapshot.settings.search) || "";
+      if (kw) title.innerHTML = highlightText(todo.text, kw);
+      else title.textContent = todo.text;
       titleRow.appendChild(priorityDot);
       titleRow.appendChild(title);
       titleWrap.appendChild(titleRow);
@@ -790,7 +913,9 @@
 
       const notes = document.createElement("p");
       notes.className = "todo-card__notes";
-      notes.textContent = todo.notes || "暂无备注，点击卡片可补充细节。";
+      const noteText = todo.notes || "暂无备注，点击卡片可补充细节。";
+      if (kw && todo.notes) notes.innerHTML = highlightText(todo.notes, kw);
+      else notes.textContent = noteText;
 
       const subtasksWrap = document.createElement("div");
       subtasksWrap.className = "todo-card__subtasks";
@@ -1192,6 +1317,9 @@
       fillListSelects(snapshot);
       fillBulkSelects(snapshot);
       renderBackupPanel(snapshot);
+      renderTemplates(snapshot);
+      renderRecentSearches(snapshot);
+      renderReminderPanel(snapshot);
       renderTags(snapshot);
       renderStats(snapshot);
       renderBulkBar(snapshot);
@@ -1215,7 +1343,9 @@
       els.searchInput.addEventListener("input", function () {
         clearTimeout(searchTimer);
         searchTimer = setTimeout(function () {
-          store.setSettings({ search: els.searchInput.value });
+          const q = els.searchInput.value;
+          store.setSettings({ search: q });
+          if (String(q || "").trim()) store.pushRecentSearch(q);
         }, 160);
       });
 
@@ -1293,6 +1423,46 @@
         });
       });
 
+      if (els.btnReminderRefresh) {
+        els.btnReminderRefresh.addEventListener("click", function () {
+          store.checkReminders();
+          toast("提醒已刷新");
+          renderReminderPanel(store.getSnapshot());
+        });
+      }
+      if (els.btnSaveTemplate) {
+        els.btnSaveTemplate.addEventListener("click", function () {
+          const selected = ((latestSnapshot && latestSnapshot.selectedIds) || [])[0];
+          const editingId = els.editorId && els.editorId.value;
+          let payload = null;
+          if (editingId) {
+            payload = {
+              name: els.editorText.value,
+              text: els.editorText.value,
+              notes: els.editorNotes.value,
+              priority: els.editorPriority.value,
+              dueDate: els.editorDue.value || null,
+              tags: (typeof editorSelectedTags !== "undefined" ? editorSelectedTags.slice() : []),
+              listId: els.editorList ? els.editorList.value : undefined,
+              repeat: els.editorRepeat ? els.editorRepeat.value : "none",
+              remindEnabled: !!(els.editorRemindEnabled && els.editorRemindEnabled.checked),
+              remindTime: els.editorRemindTime ? els.editorRemindTime.value : "09:00",
+              subtasks: (typeof editorSubtasks !== "undefined" ? editorSubtasks.slice() : [])
+            };
+          } else if (selected) {
+            payload = { todoId: selected };
+          } else {
+            return toast("请先打开任务编辑器，或选中一个任务", "error");
+          }
+          const name = prompt("模板名称", (payload && (payload.name || payload.text)) || "未命名模板");
+          if (name === null) return;
+          const req = payload.todoId ? { todoId: payload.todoId, name: name } : Object.assign({}, payload, { name: name });
+          store.saveTemplate(req).then(function (result) {
+            if (!result.ok) toast(result.error || "保存失败", "error");
+            else toast("模板已保存");
+          });
+        });
+      }
       if (els.btnBackupNow) {
         els.btnBackupNow.addEventListener("click", function () {
           store.createBackup("手动备份").then(function (result) {

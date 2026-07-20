@@ -96,6 +96,12 @@
         <button id="btn-export" class="ghost-btn" type="button">导出 JSON</button>
         <button id="btn-import" class="ghost-btn" type="button">导入 JSON</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden />
+        <div id="template-panel" class="template-panel">
+          <p class="backup-panel__title">任务模板</p>
+          <p class="backup-meta muted">一键套用周报、复盘等高频任务</p>
+          <div id="template-list" class="template-list"></div>
+          <button id="btn-save-template" class="ghost-btn" type="button">从当前编辑器/选中任务存模板</button>
+        </div>
         <div id="backup-panel" class="backup-panel">
           <p class="backup-panel__title">自动备份</p>
           <p id="backup-meta" class="backup-meta muted">尚未创建备份</p>
@@ -113,7 +119,8 @@
       <header class="topbar">
         <div class="search-box">
           <span class="search-icon" aria-hidden="true">⌕</span>
-          <input id="search-input" type="search" placeholder="搜索标题、备注、标签…" autocomplete="off" />
+          <input id="search-input" type="search" placeholder="搜索标题、备注、标签、子任务…" autocomplete="off" />
+          <div id="recent-searches" class="recent-searches" hidden></div>
         </div>
         <div class="topbar__actions">
           <label class="select-wrap">
@@ -150,6 +157,18 @@
         <div id="quick-preview" class="quick-preview" hidden></div>
         <p id="quick-hint" class="quick-hint">支持：今天/明天/下周一、!!紧急、#标签、@清单、提醒09:30、每天、| 子任务1 / 子任务2</p>
         <p id="form-error" class="form-error" role="alert" hidden></p>
+      </section>
+
+      <section id="reminder-panel" class="reminder-panel" aria-label="提醒面板" hidden>
+        <div class="reminder-panel__head">
+          <div>
+            <p class="eyebrow">Reminders</p>
+            <h2>提醒面板</h2>
+          </div>
+          <button id="btn-reminder-refresh" class="ghost-btn" type="button">刷新</button>
+        </div>
+        <div id="reminder-list" class="reminder-list"></div>
+        <p id="reminder-empty" class="muted">近 7 天没有开启提醒的任务。</p>
       </section>
 
       <section id="focus-panel" class="focus-panel" aria-label="今日焦点" hidden>

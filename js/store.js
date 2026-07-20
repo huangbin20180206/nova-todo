@@ -193,17 +193,17 @@
     return { ok:true, error:"", payload:payload, tokens:tokens };
   }
   function normalizeTodo(raw,index,fallbackListId){ const now=Date.now(); const text=String((raw&&raw.text)||"").trim(); return {id:raw&&typeof raw.id==="string"&&raw.id?raw.id:createId(),text:text,notes:String((raw&&raw.notes)||"").trim(),subtasks:normalizeSubtasks(raw&&raw.subtasks),completed:!!(raw&&raw.completed),archived:!!(raw&&raw.archived),pinned:!!(raw&&raw.pinned),priority:normalizePriority(raw&&raw.priority),dueDate:raw&&typeof raw.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dueDate)?raw.dueDate:null,tags:normalizeTags(raw&&raw.tags),listId:raw&&typeof raw.listId==="string"&&raw.listId?raw.listId:(fallbackListId||"list-inbox"),repeat:normalizeRepeat(raw&&raw.repeat),remindEnabled:!!(raw&&raw.remindEnabled),remindTime:normalizeRemindTime(raw&&raw.remindTime),lastNotifiedKey:raw&&typeof raw.lastNotifiedKey==="string"?raw.lastNotifiedKey:null,completedAt:typeof (raw&&raw.completedAt)==="number"?raw.completedAt:null,order:typeof (raw&&raw.order)==="number"?raw.order:index||now,createdAt:typeof (raw&&raw.createdAt)==="number"?raw.createdAt:now,updatedAt:typeof (raw&&raw.updatedAt)==="number"?raw.updatedAt:now}; }
-  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null}; }
+  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null,recentSearches:[]}; }
 
   function createStore(db){
-    const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],ready:false,history:[],selectedIds:[],backupPoints:[]};
+    const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],templates:[],ready:false,history:[],selectedIds:[],backupPoints:[]};
     const listeners=new Set();
     let reminderTimer=null;
     function emit(){ listeners.forEach(function(fn){ try{fn(getSnapshot());}catch(error){console.error(error);} }); }
-    function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice() }); }); }
+    function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice(), subtasks: (todo.subtasks||[]).map(function(s){ return Object.assign({}, s); }) }); }); }
     function pushHistory(label){ state.history.push({ label: label || "变更", todos: cloneTodos(), selectedIds: state.selectedIds.slice(), at: Date.now() }); if (state.history.length > 30) state.history.shift(); }
     async function restoreTodos(todos){ state.todos = (todos || []).map(function(item, index){ return normalizeTodo(item, index, state.lists[0].id); }); await db.clearTodos(); if (state.todos.length) await db.putTodos(state.todos); }
-    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null}; }
+    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8)}; }
     function subscribe(fn){ listeners.add(fn); return function(){ listeners.delete(fn); }; }
     function listExists(id){ return state.lists.some(function(list){return list.id===id;}); }
     function ensureListId(listId){ if(listId&&listExists(listId)) return listId; return state.lists[0]?state.lists[0].id:"list-inbox"; }
@@ -221,8 +221,18 @@
     function getFocusTodos(){ const today=todayKey(); const activeListId=state.settings.activeListId||"all"; return state.todos.filter(function(todo){ if(todo.archived||todo.completed) return false; if(activeListId!=="all"&&todo.listId!==activeListId) return false; const isOverdue=!!todo.dueDate&&todo.dueDate<today; const isToday=todo.dueDate===today; const isHot=todo.priority==="urgent"||todo.priority==="high"; const isRemindToday=todo.remindEnabled&&todo.dueDate===today; return isOverdue||isToday||isHot||isRemindToday; }).sort(function(a,b){ const aOverdue=a.dueDate&&a.dueDate<today?0:1; const bOverdue=b.dueDate&&b.dueDate<today?0:1; if(aOverdue!==bOverdue) return aOverdue-bOverdue; const aToday=a.dueDate===today?0:1; const bToday=b.dueDate===today?0:1; if(aToday!==bToday) return aToday-bToday; const pr=(PRIORITY_RANK[b.priority]||0)-(PRIORITY_RANK[a.priority]||0); if(pr) return pr; if(a.dueDate&&b.dueDate) return a.dueDate.localeCompare(b.dueDate); if(a.dueDate) return -1; if(b.dueDate) return 1; return a.order-b.order; }).slice(0,5); }
     function matchesView(todo,view){ const today=todayKey(); if(view==="archived") return todo.archived; if(todo.archived) return false; if(view==="active") return !todo.completed; if(view==="completed") return todo.completed; if(view==="today") return !todo.completed&&todo.dueDate===today; if(view==="overdue") return !todo.completed&&!!todo.dueDate&&todo.dueDate<today; if(view==="scheduled") return !todo.completed&&todo.repeat&&todo.repeat!=="none"; return true; }
     function sortTodos(list,sort){ const cloned=list.slice(); function pinFirst(cmp){ return function(a,b){ const pin=(b.pinned?1:0)-(a.pinned?1:0); if(pin) return pin; return cmp(a,b); }; } if(sort==="created_desc") return cloned.sort(pinFirst(function(a,b){return b.createdAt-a.createdAt;})); if(sort==="due_asc") return cloned.sort(pinFirst(function(a,b){ if(!a.dueDate&&!b.dueDate) return a.order-b.order; if(!a.dueDate) return 1; if(!b.dueDate) return -1; return a.dueDate.localeCompare(b.dueDate)||a.order-b.order; })); if(sort==="priority_desc") return cloned.sort(pinFirst(function(a,b){ return (PRIORITY_RANK[b.priority]||0)-(PRIORITY_RANK[a.priority]||0)||a.order-b.order; })); if(sort==="alpha_asc") return cloned.sort(pinFirst(function(a,b){ return a.text.localeCompare(b.text,"zh-CN")||a.order-b.order; })); return cloned.sort(pinFirst(function(a,b){return a.order-b.order;})); }
-    function getVisibleTodos(){ const settings=state.settings; const keyword=(settings.search||"").trim().toLowerCase(); const activeListId=settings.activeListId||"all"; let list=state.todos.filter(function(todo){ if(activeListId!=="all"&&todo.listId!==activeListId) return false; if(!matchesView(todo,settings.view)) return false; if(settings.activeTag&&todo.tags.map(function(tag){return tag.toLowerCase();}).indexOf(settings.activeTag.toLowerCase())===-1) return false; if(!keyword) return true; const listName=(state.lists.find(function(item){return item.id===todo.listId;})||{}).name||""; const hay=[todo.text,todo.notes,listName].concat(todo.tags).join(" ").toLowerCase(); return hay.indexOf(keyword)!==-1; }); return sortTodos(list,settings.sort); }
-    function getUpcomingReminders(){ const today=todayKey(); return state.todos.filter(function(todo){ return !todo.archived&&!todo.completed&&todo.remindEnabled&&todo.dueDate&&todo.dueDate<=today; }).slice(0,10); }
+    function getVisibleTodos(){ const settings=state.settings; const keyword=(settings.search||"").trim().toLowerCase(); const activeListId=settings.activeListId||"all"; let list=state.todos.filter(function(todo){ if(activeListId!=="all"&&todo.listId!==activeListId) return false; if(!matchesView(todo,settings.view)) return false; if(settings.activeTag&&todo.tags.map(function(tag){return tag.toLowerCase();}).indexOf(settings.activeTag.toLowerCase())===-1) return false; if(!keyword) return true; const listName=(state.lists.find(function(item){return item.id===todo.listId;})||{}).name||""; const subText=(todo.subtasks||[]).map(function(s){return s.text||"";}).join(" "); const hay=[todo.text,todo.notes,listName,subText].concat(todo.tags).join(" ").toLowerCase(); return hay.indexOf(keyword)!==-1; }); return sortTodos(list,settings.sort); }
+    function getUpcomingReminders(){
+      const today=todayKey();
+      const end=addDays(today,7);
+      return state.todos.filter(function(todo){
+        if(todo.archived||todo.completed||!todo.remindEnabled||!todo.dueDate) return false;
+        return todo.dueDate<=end;
+      }).sort(function(a,b){
+        if(a.dueDate<b.dueDate) return -1; if(a.dueDate>b.dueDate) return 1;
+        return String(a.remindTime||"09:00").localeCompare(String(b.remindTime||"09:00"));
+      }).slice(0,12);
+    }
     function reminderDueNow(todo,now){ if(!todo.remindEnabled||todo.completed||todo.archived||!todo.dueDate) return false; const today=todayKey(now); if(todo.dueDate>today) return false; const parts=(todo.remindTime||"09:00").split(":"); const hh=parseInt(parts[0],10)||9; const mm=parseInt(parts[1],10)||0; const fire=new Date(todo.dueDate+"T00:00:00"); fire.setHours(hh,mm,0,0); if(now.getTime()<fire.getTime()&&todo.dueDate===today) return false; const key=todo.dueDate+"@"+(todo.remindTime||"09:00"); return todo.lastNotifiedKey!==key; }
     async function markNotified(todo,key){ return updateTodo(todo.id,{lastNotifiedKey:key}); }
     async function checkReminders(notifier){ if(!state.settings.notificationsEnabled) return []; const now=new Date(); const due=state.todos.filter(function(todo){return reminderDueNow(todo,now);}); const fired=[]; for(const todo of due){ const key=todo.dueDate+"@"+(todo.remindTime||"09:00"); if(typeof notifier==="function"){ try{notifier(todo);}catch(error){console.warn(error);} } await markNotified(todo,key); fired.push(todo); } return fired; }
@@ -230,7 +240,7 @@
     function stopReminderLoop(){ if(reminderTimer){ global.clearInterval(reminderTimer); reminderTimer=null; } }
 
     async function init(){
-      const [todos,settings,lists,tagLibrary,backupPoints]=await Promise.all([db.getAllTodos(),db.getMeta("settings",defaultSettings()),db.getMeta("lists",null),db.getMeta("tagLibrary",null),db.getMeta("backupPoints",[])]);
+      const [todos,settings,lists,tagLibrary,backupPoints,templates]=await Promise.all([db.getAllTodos(),db.getMeta("settings",defaultSettings()),db.getMeta("lists",null),db.getMeta("tagLibrary",null),db.getMeta("backupPoints",[]),db.getMeta("templates",[])]);
       if(Array.isArray(lists)&&lists.length){ state.lists=lists.map(function(item,index){return normalizeList(item,index);}); }
       else { state.lists=defaultLists(); await persistLists(); }
       let migrated=false;
@@ -259,7 +269,7 @@
         state.tagLibrary=uniqueTags(used.concat(["工作","设计","本周","生活","学习"]));
         await persistTagLibrary();
       }
-      state.backupPoints=Array.isArray(backupPoints)?backupPoints:[]; state.ready=true; maybeAutoBackup(false).catch(function(){}); emit(); return getSnapshot();
+      state.backupPoints=Array.isArray(backupPoints)?backupPoints:[]; state.templates=Array.isArray(templates)?templates.map(function(item,index){return normalizeTemplate(item,index);}).filter(Boolean):[]; if(!Array.isArray(state.settings.recentSearches)) state.settings.recentSearches=[]; state.ready=true; maybeAutoBackup(false).catch(function(){}); emit(); return getSnapshot();
     }
     async function addTodo(input){
       const text=String((input&&input.text)||"").trim(); if(!text) return {ok:false,error:"请输入待办内容，空内容不能添加。"};
@@ -433,8 +443,83 @@
       if(!due) return {ok:false, skipped:true};
       const result = await createBackup(force ? "手动备份" : "自动备份", {silent:false}); return result;
     }
+    
+    function normalizeTemplate(raw,index){
+      const now=Date.now();
+      const text=String((raw&&raw.text)||"").trim();
+      if(!text) return null;
+      return {
+        id: raw&&typeof raw.id==="string"&&raw.id?raw.id:createId(),
+        name: String((raw&&raw.name)||text).trim().slice(0,40) || text.slice(0,40),
+        text: text.slice(0,200),
+        notes: String((raw&&raw.notes)||"").trim(),
+        priority: normalizePriority(raw&&raw.priority),
+        tags: normalizeTags(raw&&raw.tags),
+        listId: raw&&typeof raw.listId==="string"&&raw.listId?raw.listId:"list-inbox",
+        repeat: normalizeRepeat(raw&&raw.repeat),
+        remindEnabled: !!(raw&&raw.remindEnabled),
+        remindTime: normalizeRemindTime(raw&&raw.remindTime),
+        subtasks: normalizeSubtasks(raw&&raw.subtasks),
+        createdAt: typeof (raw&&raw.createdAt)==="number"?raw.createdAt:now,
+        order: typeof (raw&&raw.order)==="number"?raw.order:(index+1)*1000
+      };
+    }
+    async function persistTemplates(){ await db.setMeta("templates", state.templates||[]); }
+    async function saveTemplate(input){
+      const base = input&&input.todoId ? state.todos.find(function(t){return t.id===input.todoId;}) : input;
+      if(!base) return {ok:false,error:"没有可保存的模板内容"};
+      const tpl = normalizeTemplate({
+        name: (input&&input.name) || base.text || base.name,
+        text: base.text,
+        notes: base.notes,
+        priority: base.priority,
+        tags: base.tags,
+        listId: base.listId,
+        repeat: base.repeat,
+        remindEnabled: base.remindEnabled,
+        remindTime: base.remindTime,
+        subtasks: base.subtasks
+      }, (state.templates||[]).length);
+      if(!tpl) return {ok:false,error:"模板标题不能为空"};
+      state.templates = [tpl].concat(state.templates||[]).slice(0,20);
+      await persistTemplates(); emit(); return {ok:true, template: tpl};
+    }
+    async function deleteTemplate(id){
+      const before=(state.templates||[]).length;
+      state.templates=(state.templates||[]).filter(function(item){return item.id!==id;});
+      if(state.templates.length===before) return {ok:false,error:"模板不存在"};
+      await persistTemplates(); emit(); return {ok:true};
+    }
+    async function applyTemplate(id){
+      const tpl=(state.templates||[]).find(function(item){return item.id===id;});
+      if(!tpl) return {ok:false,error:"模板不存在"};
+      return addTodo({
+        text: tpl.text,
+        notes: tpl.notes,
+        priority: tpl.priority,
+        tags: tpl.tags,
+        listId: ensureListId(tpl.listId),
+        repeat: tpl.repeat,
+        remindEnabled: tpl.remindEnabled,
+        remindTime: tpl.remindTime,
+        subtasks: (tpl.subtasks||[]).map(function(s){ return Object.assign({}, s, { completed:false, id: createId() }); })
+      });
+    }
+    async function pushRecentSearch(keyword){
+      const q=String(keyword||"").trim();
+      if(!q) return {ok:true, recentSearches: state.settings.recentSearches||[]};
+      const list=[q].concat((state.settings.recentSearches||[]).filter(function(item){ return item.toLowerCase()!==q.toLowerCase(); })).slice(0,8);
+      state.settings.recentSearches=list;
+      await persistSettings(); emit();
+      return {ok:true, recentSearches: list.slice()};
+    }
+    async function clearRecentSearches(){
+      state.settings.recentSearches=[];
+      await persistSettings(); emit();
+      return {ok:true};
+    }
     async function setDensity(density){ return setSettings({density: density==="compact"?"compact":"comfortable"}); }
-return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
+return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,saveTemplate:saveTemplate,deleteTemplate:deleteTemplate,applyTemplate:applyTemplate,pushRecentSearch:pushRecentSearch,clearRecentSearches:clearRecentSearches,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
   }
   global.NovaStore={createStore:createStore,normalizeTodo:normalizeTodo,normalizeSubtasks:normalizeSubtasks,parseQuickAdd:parseQuickAdd,defaultSettings:defaultSettings,defaultLists:defaultLists,todayKey:todayKey,tagColor:tagColor,nextDueDate:nextDueDate,subtaskProgress:subtaskProgress};
 })(window);
