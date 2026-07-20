@@ -193,17 +193,17 @@
     return { ok:true, error:"", payload:payload, tokens:tokens };
   }
   function normalizeTodo(raw,index,fallbackListId){ const now=Date.now(); const text=String((raw&&raw.text)||"").trim(); return {id:raw&&typeof raw.id==="string"&&raw.id?raw.id:createId(),text:text,notes:String((raw&&raw.notes)||"").trim(),subtasks:normalizeSubtasks(raw&&raw.subtasks),completed:!!(raw&&raw.completed),archived:!!(raw&&raw.archived),pinned:!!(raw&&raw.pinned),priority:normalizePriority(raw&&raw.priority),dueDate:raw&&typeof raw.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dueDate)?raw.dueDate:null,tags:normalizeTags(raw&&raw.tags),listId:raw&&typeof raw.listId==="string"&&raw.listId?raw.listId:(fallbackListId||"list-inbox"),repeat:normalizeRepeat(raw&&raw.repeat),remindEnabled:!!(raw&&raw.remindEnabled),remindTime:normalizeRemindTime(raw&&raw.remindTime),lastNotifiedKey:raw&&typeof raw.lastNotifiedKey==="string"?raw.lastNotifiedKey:null,completedAt:typeof (raw&&raw.completedAt)==="number"?raw.completedAt:null,order:typeof (raw&&raw.order)==="number"?raw.order:index||now,createdAt:typeof (raw&&raw.createdAt)==="number"?raw.createdAt:now,updatedAt:typeof (raw&&raw.updatedAt)==="number"?raw.updatedAt:now}; }
-  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable"}; }
+  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null}; }
 
   function createStore(db){
-    const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],ready:false,history:[],selectedIds:[]};
+    const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],ready:false,history:[],selectedIds:[],backupPoints:[]};
     const listeners=new Set();
     let reminderTimer=null;
     function emit(){ listeners.forEach(function(fn){ try{fn(getSnapshot());}catch(error){console.error(error);} }); }
     function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice() }); }); }
     function pushHistory(label){ state.history.push({ label: label || "变更", todos: cloneTodos(), selectedIds: state.selectedIds.slice(), at: Date.now() }); if (state.history.length > 30) state.history.shift(); }
     async function restoreTodos(todos){ state.todos = (todos || []).map(function(item, index){ return normalizeTodo(item, index, state.lists[0].id); }); await db.clearTodos(); if (state.todos.length) await db.putTodos(state.todos); }
-    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0}; }
+    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null}; }
     function subscribe(fn){ listeners.add(fn); return function(){ listeners.delete(fn); }; }
     function listExists(id){ return state.lists.some(function(list){return list.id===id;}); }
     function ensureListId(listId){ if(listId&&listExists(listId)) return listId; return state.lists[0]?state.lists[0].id:"list-inbox"; }
@@ -230,7 +230,7 @@
     function stopReminderLoop(){ if(reminderTimer){ global.clearInterval(reminderTimer); reminderTimer=null; } }
 
     async function init(){
-      const [todos,settings,lists,tagLibrary]=await Promise.all([db.getAllTodos(),db.getMeta("settings",defaultSettings()),db.getMeta("lists",null),db.getMeta("tagLibrary",null)]);
+      const [todos,settings,lists,tagLibrary,backupPoints]=await Promise.all([db.getAllTodos(),db.getMeta("settings",defaultSettings()),db.getMeta("lists",null),db.getMeta("tagLibrary",null),db.getMeta("backupPoints",[])]);
       if(Array.isArray(lists)&&lists.length){ state.lists=lists.map(function(item,index){return normalizeList(item,index);}); }
       else { state.lists=defaultLists(); await persistLists(); }
       let migrated=false;
@@ -259,7 +259,7 @@
         state.tagLibrary=uniqueTags(used.concat(["工作","设计","本周","生活","学习"]));
         await persistTagLibrary();
       }
-      state.ready=true; emit(); return getSnapshot();
+      state.backupPoints=Array.isArray(backupPoints)?backupPoints:[]; state.ready=true; maybeAutoBackup(false).catch(function(){}); emit(); return getSnapshot();
     }
     async function addTodo(input){
       const text=String((input&&input.text)||"").trim(); if(!text) return {ok:false,error:"请输入待办内容，空内容不能添加。"};
@@ -348,8 +348,93 @@
     async function bulkMoveList(listId, ids){ const targetIds=(ids&&ids.length?ids:state.selectedIds).slice(); if(!targetIds.length) return {ok:false,error:"请先选择任务"}; const nextList=ensureListId(listId); pushHistory("批量移动清单"); for(const id of targetIds) await updateTodo(id,{listId:nextList}); return {ok:true,count:targetIds.length,listId:nextList}; }
     async function bulkArchive(ids, archived){ const targetIds=(ids&&ids.length?ids:state.selectedIds).slice(); if(!targetIds.length) return {ok:false,error:"请先选择任务"}; pushHistory(archived?"批量归档":"批量取消归档"); for(const id of targetIds) await archiveTodo(id, !!archived); return {ok:true,count:targetIds.length}; }
     async function undo(){ const snap=state.history.pop(); if(!snap) return {ok:false,error:"没有可撤销的操作"}; await restoreTodos(snap.todos); state.selectedIds=snap.selectedIds||[]; emit(); return {ok:true,label:snap.label||"变更"}; }
+
+    async function bulkSetPriority(priority, ids){
+      const targetIds=(ids&&ids.length?ids:state.selectedIds).slice();
+      if(!targetIds.length) return {ok:false,error:"请先选择任务"};
+      const next=normalizePriority(priority);
+      pushHistory("批量改优先级");
+      for(const id of targetIds) await updateTodo(id,{priority:next});
+      return {ok:true,count:targetIds.length,priority:next};
+    }
+    async function bulkAddTag(tagName, ids){
+      const tags=normalizeTags(tagName);
+      if(!tags.length) return {ok:false,error:"请选择标签"};
+      const tag=tags[0];
+      const targetIds=(ids&&ids.length?ids:state.selectedIds).slice();
+      if(!targetIds.length) return {ok:false,error:"请先选择任务"};
+      pushHistory("批量添加标签");
+      for(const id of targetIds){
+        const todo=state.todos.find(function(item){return item.id===id;});
+        if(!todo) continue;
+        const nextTags=uniqueTags((todo.tags||[]).concat([tag]));
+        await updateTodo(id,{tags:nextTags});
+      }
+      return {ok:true,count:targetIds.length,tag:tag};
+    }
+    function buildBackupPayload(label){
+      return {
+        id: createId(),
+        version: 2,
+        type: "nova-todo-backup",
+        label: label || "自动备份",
+        createdAt: Date.now(),
+        exportedAt: new Date().toISOString(),
+        todos: state.todos.map(function(item){ return Object.assign({}, item, { subtasks: (item.subtasks||[]).map(function(s){return Object.assign({},s);}), tags:(item.tags||[]).slice() }); }),
+        lists: state.lists.map(function(item){ return Object.assign({}, item); }),
+        tagLibrary: state.tagLibrary.slice(),
+        settings: Object.assign({}, state.settings)
+      };
+    }
+    async function persistBackupPoints(){
+      state.backupPoints = (state.backupPoints || []).slice(0, 8);
+      await db.setMeta("backupPoints", state.backupPoints);
+      return state.backupPoints;
+    }
+    async function createBackup(label, options){
+      options = options || {};
+      const point = buildBackupPayload(label || "手动备份");
+      state.backupPoints = [point].concat(state.backupPoints || []).slice(0, 8);
+      state.settings.lastBackupAt = point.createdAt;
+      await persistBackupPoints();
+      await persistSettings();
+      // lightweight localStorage mirror for emergency recovery
+      try {
+        global.localStorage.setItem("nova-todo.backup.latest", JSON.stringify({
+          id: point.id,
+          createdAt: point.createdAt,
+          label: point.label,
+          count: (point.todos||[]).length
+        }));
+        global.localStorage.setItem("nova-todo.backup.latest.payload", JSON.stringify(point));
+      } catch (error) {
+        console.warn("localStorage backup mirror failed", error);
+      }
+      if(!options.silent) emit();
+      return {ok:true, backup: point, count: (point.todos||[]).length};
+    }
+    async function listBackups(){
+      return (state.backupPoints || []).slice();
+    }
+    async function restoreBackup(backupId){
+      const point = (state.backupPoints || []).find(function(item){ return item.id === backupId; });
+      if(!point) return {ok:false,error:"备份不存在"};
+      pushHistory("恢复备份");
+      const result = await importData(point, "replace");
+      state.settings.lastBackupAt = Date.now();
+      await persistSettings();
+      emit();
+      return {ok:true, count: result.count || 0, label: point.label || "备份"};
+    }
+    async function maybeAutoBackup(force){
+      if(!state.settings.autoBackup && !force) return {ok:false, skipped:true};
+      const last = state.settings.lastBackupAt || 0;
+      const due = force || !last || (Date.now() - last > 6 * 60 * 60 * 1000);
+      if(!due) return {ok:false, skipped:true};
+      const result = await createBackup(force ? "手动备份" : "自动备份", {silent:false}); return result;
+    }
     async function setDensity(density){ return setSettings({density: density==="compact"?"compact":"comfortable"}); }
-return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
+return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
   }
   global.NovaStore={createStore:createStore,normalizeTodo:normalizeTodo,normalizeSubtasks:normalizeSubtasks,parseQuickAdd:parseQuickAdd,defaultSettings:defaultSettings,defaultLists:defaultLists,todayKey:todayKey,tagColor:tagColor,nextDueDate:nextDueDate,subtaskProgress:subtaskProgress};
 })(window);

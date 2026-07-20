@@ -15,7 +15,13 @@
   <div class="bg-grid" aria-hidden="true"></div>
 
   <div class="shell">
-    <aside class="sidebar">
+    <button id="btn-sidebar-toggle" class="sidebar-toggle icon-btn" type="button" aria-label="打开菜单" title="菜单">☰</button>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar__mobile-head">
+        <strong>导航</strong>
+        <button id="btn-sidebar-close" class="icon-btn" type="button" aria-label="关闭菜单">✕</button>
+      </div>
       <div class="brand">
         <div class="brand__mark">N</div>
         <div>
@@ -90,6 +96,16 @@
         <button id="btn-export" class="ghost-btn" type="button">导出 JSON</button>
         <button id="btn-import" class="ghost-btn" type="button">导入 JSON</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden />
+        <div id="backup-panel" class="backup-panel">
+          <p class="backup-panel__title">自动备份</p>
+          <p id="backup-meta" class="backup-meta muted">尚未创建备份</p>
+          <div class="backup-actions">
+            <button id="btn-backup-now" class="ghost-btn" type="button">立即备份</button>
+            <button id="btn-backup-restore" class="ghost-btn" type="button">恢复备份</button>
+            <button id="btn-backup-download" class="ghost-btn" type="button">下载备份</button>
+          </div>
+          <select id="backup-select" class="backup-select" aria-label="选择备份点"></select>
+        </div>
       </div>
     </aside>
 
@@ -131,6 +147,7 @@
           </select>
           <button class="primary-btn" type="submit">添加</button>
         </form>
+        <div id="quick-preview" class="quick-preview" hidden></div>
         <p id="quick-hint" class="quick-hint">支持：今天/明天/下周一、!!紧急、#标签、@清单、提醒09:30、每天、| 子任务1 / 子任务2</p>
         <p id="form-error" class="form-error" role="alert" hidden></p>
       </section>
@@ -165,6 +182,19 @@
         <div class="bulk-bar__actions">
           <button id="bulk-complete" class="ghost-btn" type="button">✓ 完成</button>
           <button id="bulk-pin" class="ghost-btn" type="button">📌 置顶</button>
+          <select id="bulk-priority" class="bulk-select" aria-label="批量优先级">
+            <option value="">优先级…</option>
+            <option value="urgent">🔴 紧急</option>
+            <option value="high">🟠 高</option>
+            <option value="medium">🔵 中</option>
+            <option value="low">🟢 低</option>
+          </select>
+          <select id="bulk-list" class="bulk-select" aria-label="批量移动清单">
+            <option value="">移动到清单…</option>
+          </select>
+          <select id="bulk-tag" class="bulk-select" aria-label="批量添加标签">
+            <option value="">添加标签…</option>
+          </select>
           <button id="bulk-archive" class="ghost-btn" type="button">📦 归档</button>
           <button id="bulk-delete" class="danger-btn" type="button">删除</button>
           <button id="bulk-clear" class="ghost-btn" type="button">取消选择</button>

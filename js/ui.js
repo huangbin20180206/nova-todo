@@ -126,6 +126,19 @@
       bulkArchive: $("#bulk-archive"),
       bulkDelete: $("#bulk-delete"),
       bulkClear: $("#bulk-clear"),
+      bulkPriority: $("#bulk-priority"),
+      bulkList: $("#bulk-list"),
+      bulkTag: $("#bulk-tag"),
+      quickPreview: $("#quick-preview"),
+      btnSidebarToggle: $("#btn-sidebar-toggle"),
+      btnSidebarClose: $("#btn-sidebar-close"),
+      sidebar: $("#sidebar"),
+      sidebarBackdrop: $("#sidebar-backdrop"),
+      backupMeta: $("#backup-meta"),
+      backupSelect: $("#backup-select"),
+      btnBackupNow: $("#btn-backup-now"),
+      btnBackupRestore: $("#btn-backup-restore"),
+      btnBackupDownload: $("#btn-backup-download"),
       btnClearCompleted: $("#btn-clear-completed"),
       btnExport: $("#btn-export"),
       btnImport: $("#btn-import"),
@@ -254,6 +267,116 @@
       return true;
     }
 
+
+    function closeMobileSidebar() {
+      document.body.classList.remove("sidebar-open");
+      if (els.sidebarBackdrop) els.sidebarBackdrop.hidden = true;
+    }
+    function openMobileSidebar() {
+      document.body.classList.add("sidebar-open");
+      if (els.sidebarBackdrop) els.sidebarBackdrop.hidden = false;
+    }
+    function formatBackupTime(ts) {
+      if (!ts) return "尚未创建备份";
+      try {
+        return new Date(ts).toLocaleString("zh-CN", { hour12: false });
+      } catch (error) {
+        return String(ts);
+      }
+    }
+    function renderBackupPanel(snapshot) {
+      if (!els.backupMeta && !els.backupSelect) return;
+      const points = (snapshot && snapshot.backupPoints) || [];
+      if (els.backupMeta) {
+        if (!points.length) els.backupMeta.textContent = "尚未创建备份（建议开启后定期备份）";
+        else els.backupMeta.textContent = "最近备份：" + formatBackupTime(points[0].createdAt) + " · 共 " + points.length + " 个恢复点";
+      }
+      if (els.backupSelect) {
+        const current = els.backupSelect.value;
+        els.backupSelect.innerHTML = "";
+        if (!points.length) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = "暂无备份点";
+          els.backupSelect.appendChild(opt);
+        } else {
+          points.forEach(function (point, index) {
+            const opt = document.createElement("option");
+            opt.value = point.id;
+            opt.textContent = (index === 0 ? "最新 · " : "") + (point.label || "备份") + " · " + formatBackupTime(point.createdAt) + " · " + ((point.todos && point.todos.length) || 0) + " 条";
+            els.backupSelect.appendChild(opt);
+          });
+          if (current && Array.from(els.backupSelect.options).some(function (o) { return o.value === current; })) {
+            els.backupSelect.value = current;
+          }
+        }
+      }
+    }
+    function updateQuickPreview() {
+      if (!els.quickPreview || !els.quickInput) return;
+      const raw = els.quickInput.value || "";
+      if (!String(raw).trim()) {
+        els.quickPreview.hidden = true;
+        els.quickPreview.innerHTML = "";
+        return;
+      }
+      const parsed = store.parseQuick(raw, {
+        priority: els.quickPriority ? els.quickPriority.value : "medium",
+        listId: els.quickList && els.quickList.value ? els.quickList.value : undefined,
+      });
+      if (!parsed.ok) {
+        els.quickPreview.hidden = false;
+        els.quickPreview.innerHTML = '<span class="quick-preview__error">' + escapeHtml(parsed.error || "无法解析") + "</span>";
+        return;
+      }
+      const p = parsed.payload || {};
+      const snap = latestSnapshot || store.getSnapshot();
+      const list = (snap.lists || []).find(function (item) { return item.id === p.listId; });
+      const chips = [];
+      chips.push('<span class="qp-chip qp-chip--title">' + escapeHtml(p.text || "") + "</span>");
+      if (p.dueDate) chips.push('<span class="qp-chip">📅 ' + escapeHtml(p.dueDate) + "</span>");
+      if (p.priority && p.priority !== "medium") chips.push('<span class="qp-chip">' + escapeHtml(priorityIcon(p.priority) + " " + priorityLabel(p.priority)) + "</span>");
+      if (list) chips.push('<span class="qp-chip">' + escapeHtml((list.icon || "📁") + " " + list.name) + "</span>");
+      (p.tags || []).forEach(function (tag) { chips.push('<span class="qp-chip">🏷️ ' + escapeHtml(tag) + "</span>"); });
+      if (p.repeat && p.repeat !== "none") chips.push('<span class="qp-chip">🔁 ' + escapeHtml(p.repeat) + "</span>");
+      if (p.remindEnabled) chips.push('<span class="qp-chip">🔔 ' + escapeHtml(p.remindTime || "09:00") + "</span>");
+      if (p.subtasks && p.subtasks.length) chips.push('<span class="qp-chip">checklist ' + p.subtasks.length + "</span>");
+      els.quickPreview.hidden = false;
+      els.quickPreview.innerHTML = '<div class="quick-preview__label">将创建</div><div class="quick-preview__chips">' + chips.join("") + "</div>";
+    }
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+    function fillBulkSelects(snapshot) {
+      if (els.bulkList) {
+        const current = els.bulkList.value;
+        els.bulkList.innerHTML = '<option value="">移动到清单…</option>';
+        (snapshot.lists || []).forEach(function (list) {
+          const opt = document.createElement("option");
+          opt.value = list.id;
+          opt.textContent = (list.icon || "📁") + " " + list.name;
+          els.bulkList.appendChild(opt);
+        });
+        if (current) els.bulkList.value = current;
+      }
+      if (els.bulkTag) {
+        const current = els.bulkTag.value;
+        els.bulkTag.innerHTML = '<option value="">添加标签…</option>';
+        ((snapshot.managedTags || snapshot.tagLibrary || [])).forEach(function (tag) {
+          const name = typeof tag === "string" ? tag : (tag && tag.name) || "";
+          if (!name) return;
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = "🏷️ " + name;
+          els.bulkTag.appendChild(opt);
+        });
+        if (current) els.bulkTag.value = current;
+      }
+    }
     function openEditor(todo) {
       els.editorId.value = todo ? todo.id : "";
       els.editorTitle.textContent = todo ? "编辑任务" : "新建任务";
@@ -1067,6 +1190,8 @@
       renderNav(snapshot);
       renderLists(snapshot);
       fillListSelects(snapshot);
+      fillBulkSelects(snapshot);
+      renderBackupPanel(snapshot);
       renderTags(snapshot);
       renderStats(snapshot);
       renderBulkBar(snapshot);
@@ -1135,19 +1260,75 @@
           els.quickForm.reset();
           els.quickPriority.value = "medium";
           fillListSelects(latestSnapshot || store.getSnapshot());
+          updateQuickPreview();
           els.quickInput.focus();
           const extra = parsed.tokens && parsed.tokens.length ? (" · " + parsed.tokens.slice(0, 4).join(" ")) : "";
           toast("任务已创建" + extra);
+          store.maybeAutoBackup(false);
         });
       });
 
       els.quickInput.addEventListener("input", function () {
         if (!els.formError.hidden) showError("");
+        updateQuickPreview();
       });
+      if (els.quickPriority) els.quickPriority.addEventListener("change", updateQuickPreview);
+      if (els.quickList) els.quickList.addEventListener("change", updateQuickPreview);
 
       els.btnNew.addEventListener("click", function () {
         openEditor(null);
       });
+
+      if (els.btnSidebarToggle) els.btnSidebarToggle.addEventListener("click", openMobileSidebar);
+      if (els.btnSidebarClose) els.btnSidebarClose.addEventListener("click", closeMobileSidebar);
+      if (els.sidebarBackdrop) els.sidebarBackdrop.addEventListener("click", closeMobileSidebar);
+      if (els.listNav) {
+        els.listNav.addEventListener("click", function () {
+          if (window.matchMedia("(max-width: 900px)").matches) closeMobileSidebar();
+        });
+      }
+      document.querySelectorAll(".side-nav .nav-item").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          if (window.matchMedia("(max-width: 900px)").matches) closeMobileSidebar();
+        });
+      });
+
+      if (els.btnBackupNow) {
+        els.btnBackupNow.addEventListener("click", function () {
+          store.createBackup("手动备份").then(function (result) {
+            if (!result.ok) toast(result.error || "备份失败", "error");
+            else toast("已创建备份 · " + result.count + " 条任务");
+          });
+        });
+      }
+      if (els.btnBackupRestore) {
+        els.btnBackupRestore.addEventListener("click", function () {
+          const id = els.backupSelect ? els.backupSelect.value : "";
+          if (!id) return toast("请先选择备份点", "error");
+          if (!confirm("确定恢复到该备份点吗？当前数据会被覆盖（可用撤销找回本次恢复前状态）。")) return;
+          store.restoreBackup(id).then(function (result) {
+            if (!result.ok) toast(result.error || "恢复失败", "error");
+            else toast("已恢复备份：" + (result.label || "") + " · " + result.count + " 条");
+          });
+        });
+      }
+      if (els.btnBackupDownload) {
+        els.btnBackupDownload.addEventListener("click", function () {
+          const id = els.backupSelect ? els.backupSelect.value : "";
+          const points = (latestSnapshot && latestSnapshot.backupPoints) || [];
+          const point = points.find(function (item) { return item.id === id; }) || points[0];
+          if (!point) return toast("暂无备份可下载", "error");
+          const blob = new Blob([JSON.stringify(point, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "nova-todo-backup-" + store.todayKey() + ".json";
+          a.click();
+          URL.revokeObjectURL(url);
+          toast("备份已下载");
+        });
+      }
+
 
       function openShortcuts() {
         if (!els.shortcutsModal) return;
@@ -1220,6 +1401,40 @@
         });
       }
       if (els.bulkClear) els.bulkClear.addEventListener("click", function () { store.clearSelection(); });
+      if (els.bulkPriority) {
+        els.bulkPriority.addEventListener("change", function () {
+          const value = els.bulkPriority.value;
+          if (!value) return;
+          store.bulkSetPriority(value).then(function (result) {
+            els.bulkPriority.value = "";
+            if (!result.ok) toast(result.error || "操作失败", "error");
+            else toast("已批量设置优先级 " + result.count + " 项");
+          });
+        });
+      }
+      if (els.bulkList) {
+        els.bulkList.addEventListener("change", function () {
+          const value = els.bulkList.value;
+          if (!value) return;
+          store.bulkMoveList(value).then(function (result) {
+            els.bulkList.value = "";
+            if (!result.ok) toast(result.error || "操作失败", "error");
+            else toast("已批量移动 " + result.count + " 项");
+          });
+        });
+      }
+      if (els.bulkTag) {
+        els.bulkTag.addEventListener("change", function () {
+          const value = els.bulkTag.value;
+          if (!value) return;
+          store.bulkAddTag(value).then(function (result) {
+            els.bulkTag.value = "";
+            if (!result.ok) toast(result.error || "操作失败", "error");
+            else toast("已批量添加标签 " + result.count + " 项");
+          });
+        });
+      }
+
 
       if (els.emptyAction) {
         els.emptyAction.addEventListener("click", function () {

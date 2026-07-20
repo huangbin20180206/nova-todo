@@ -786,3 +786,169 @@ kbd {
   .todo-card__actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
   .editor-drawer { width: min(100vw, 480px); }
 }
+
+
+/* ===== Wave1: mobile + quick preview + backup + bulk selects ===== */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 60;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  box-shadow: var(--glow);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+.sidebar-backdrop {
+  display: none;
+}
+.sidebar__mobile-head {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.quick-preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px dashed color-mix(in srgb, var(--primary) 45%, var(--line));
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+.quick-preview__label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.quick-preview__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.qp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  font-size: 12px;
+}
+.qp-chip--title {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+  color: var(--text);
+  font-weight: 600;
+}
+.quick-preview__error { color: #fb7185; font-size: 13px; }
+.bulk-select {
+  min-height: 36px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: inherit;
+  padding: 0 10px;
+  max-width: 160px;
+}
+.backup-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  display: grid;
+  gap: 8px;
+}
+.backup-panel__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.backup-meta {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.backup-select {
+  width: 100%;
+  min-height: 36px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  padding: 0 10px;
+}
+
+@media (max-width: 900px) {
+  .sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.55);
+    z-index: 70;
+  }
+  .sidebar-backdrop[hidden] { display: none !important; }
+  .layout, .shell {
+    grid-template-columns: 1fr !important;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(86vw, 320px);
+    z-index: 80;
+    transform: translateX(-105%);
+    transition: transform .2s ease;
+    overflow: auto;
+    border-right: 1px solid var(--line);
+    box-shadow: 0 20px 50px rgba(0,0,0,.35);
+  }
+  body.sidebar-open .sidebar { transform: translateX(0); }
+  .sidebar__mobile-head { display: flex; }
+  .main { padding-top: 64px !important; }
+  .topbar { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px); }
+  .topbar__actions, .quick-form, .bulk-bar, .bulk-bar__actions, .backup-actions {
+    gap: 8px;
+  }
+  .quick-form {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .quick-form input,
+  .quick-form select,
+  .quick-form button {
+    width: 100%;
+    min-height: 44px;
+  }
+  .bulk-bar {
+    position: sticky;
+    bottom: 8px;
+    z-index: 25;
+    padding: 10px;
+    border-radius: 16px;
+    backdrop-filter: blur(10px);
+  }
+  .bulk-select { max-width: none; width: 100%; min-height: 40px; }
+  .todo-card__actions { width: 100%; }
+  .todo-card__actions .ghost-btn,
+  .todo-card__actions .danger-btn,
+  .icon-btn,
+  .ghost-btn,
+  .primary-btn,
+  .danger-btn {
+    min-height: 40px;
+  }
+  .editor-drawer {
+    width: 100vw !important;
+    max-width: 100vw !important;
+  }
+}
