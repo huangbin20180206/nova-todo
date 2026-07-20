@@ -193,7 +193,7 @@
     return { ok:true, error:"", payload:payload, tokens:tokens };
   }
   function normalizeTodo(raw,index,fallbackListId){ const now=Date.now(); const text=String((raw&&raw.text)||"").trim(); return {id:raw&&typeof raw.id==="string"&&raw.id?raw.id:createId(),text:text,notes:String((raw&&raw.notes)||"").trim(),subtasks:normalizeSubtasks(raw&&raw.subtasks),completed:!!(raw&&raw.completed),archived:!!(raw&&raw.archived),pinned:!!(raw&&raw.pinned),priority:normalizePriority(raw&&raw.priority),dueDate:raw&&typeof raw.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dueDate)?raw.dueDate:null,tags:normalizeTags(raw&&raw.tags),listId:raw&&typeof raw.listId==="string"&&raw.listId?raw.listId:(fallbackListId||"list-inbox"),repeat:normalizeRepeat(raw&&raw.repeat),remindEnabled:!!(raw&&raw.remindEnabled),remindTime:normalizeRemindTime(raw&&raw.remindTime),lastNotifiedKey:raw&&typeof raw.lastNotifiedKey==="string"?raw.lastNotifiedKey:null,completedAt:typeof (raw&&raw.completedAt)==="number"?raw.completedAt:null,order:typeof (raw&&raw.order)==="number"?raw.order:index||now,createdAt:typeof (raw&&raw.createdAt)==="number"?raw.createdAt:now,updatedAt:typeof (raw&&raw.updatedAt)==="number"?raw.updatedAt:now}; }
-  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null,recentSearches:[]}; }
+  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null,recentSearches:[],sync:{enabled:false,provider:"gist",token:"",remoteId:"",endpoint:"",autoSync:false,lastSyncedAt:null,lastRemoteUpdatedAt:null,deviceId:null,lastResult:"",method:"PUT"}}; }
 
   function createStore(db){
     const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],templates:[],ready:false,history:[],selectedIds:[],backupPoints:[]};
@@ -203,7 +203,7 @@
     function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice(), subtasks: (todo.subtasks||[]).map(function(s){ return Object.assign({}, s); }) }); }); }
     function pushHistory(label){ state.history.push({ label: label || "变更", todos: cloneTodos(), selectedIds: state.selectedIds.slice(), at: Date.now() }); if (state.history.length > 30) state.history.shift(); }
     async function restoreTodos(todos){ state.todos = (todos || []).map(function(item, index){ return normalizeTodo(item, index, state.lists[0].id); }); await db.clearTodos(); if (state.todos.length) await db.putTodos(state.todos); }
-    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,schemaVersion:(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||3,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8)}; }
+    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,schemaVersion:(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||3,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8),syncStatus:(function(){ const s=Object.assign({}, defaultSettings().sync, (state.settings&&state.settings.sync)||{}); return {enabled:!!s.enabled,provider:s.provider||"gist",remoteId:s.remoteId||"",endpoint:s.endpoint||"",autoSync:!!s.autoSync,lastSyncedAt:s.lastSyncedAt||null,lastRemoteUpdatedAt:s.lastRemoteUpdatedAt||null,lastResult:s.lastResult||"",hasToken:!!s.token,deviceId:s.deviceId||null}; })()}; }
     function subscribe(fn){ listeners.add(fn); return function(){ listeners.delete(fn); }; }
     function listExists(id){ return state.lists.some(function(list){return list.id===id;}); }
     function ensureListId(listId){ if(listId&&listExists(listId)) return listId; return state.lists[0]?state.lists[0].id:"list-inbox"; }
@@ -563,8 +563,51 @@
       await persistSettings(); emit();
       return {ok:true};
     }
+    
+    function getSyncConfig(){
+      const base = defaultSettings().sync;
+      return Object.assign({}, base, (state.settings && state.settings.sync) || {});
+    }
+    async function setSyncConfig(patch){
+      const current = getSyncConfig();
+      const next = Object.assign({}, current, patch || {});
+      // normalize
+      next.provider = next.provider === "http" ? "http" : "gist";
+      next.enabled = !!next.enabled;
+      next.autoSync = !!next.autoSync;
+      next.token = String(next.token || "");
+      next.remoteId = String(next.remoteId || "").trim();
+      next.endpoint = String(next.endpoint || "").trim();
+      next.method = (next.method || "PUT").toUpperCase();
+      state.settings.sync = next;
+      await persistSettings();
+      emit();
+      return { ok:true, sync: Object.assign({}, next) };
+    }
+    async function applySyncPayload(payload, options){
+      options = options || {};
+      // reuse importData path for todos/lists/settings but preserve local sync secrets
+      const localSync = getSyncConfig();
+      const mode = options.mode || "replace";
+      if(options.label) pushHistory(options.label);
+      const incomingSettings = Object.assign({}, defaultSettings(), (payload && payload.settings) || {});
+      incomingSettings.sync = localSync; // never overwrite secrets from remote
+      // importData currently resets lists/todos; call it then patch templates
+      const result = await importData({
+        todos: payload && payload.todos,
+        lists: payload && payload.lists,
+        tagLibrary: payload && payload.tagLibrary,
+        settings: incomingSettings
+      }, mode);
+      if(Array.isArray(payload && payload.templates)){
+        state.templates = payload.templates.map(function(item,index){ return normalizeTemplate(item,index); }).filter(Boolean).slice(0,20);
+        await db.setMeta("templates", state.templates);
+      }
+      emit();
+      return { ok:true, count: result.count || 0 };
+    }
     async function setDensity(density){ return setSettings({density: density==="compact"?"compact":"comfortable"}); }
-return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,saveTemplate:saveTemplate,deleteTemplate:deleteTemplate,applyTemplate:applyTemplate,pushRecentSearch:pushRecentSearch,clearRecentSearches:clearRecentSearches,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
+return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,setSyncConfig:setSyncConfig,getSyncConfig:getSyncConfig,applySyncPayload:applySyncPayload,saveTemplate:saveTemplate,deleteTemplate:deleteTemplate,applyTemplate:applyTemplate,pushRecentSearch:pushRecentSearch,clearRecentSearches:clearRecentSearches,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
   }
   global.NovaStore={createStore:createStore,normalizeTodo:normalizeTodo,normalizeSubtasks:normalizeSubtasks,parseQuickAdd:parseQuickAdd,defaultSettings:defaultSettings,defaultLists:defaultLists,todayKey:todayKey,tagColor:tagColor,nextDueDate:nextDueDate,subtaskProgress:subtaskProgress};
 })(window);

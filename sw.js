@@ -1,4 +1,4 @@
-const CACHE = "nova-todo-v4";
+const CACHE = "nova-todo-v5";
 const ASSETS = [
   "./",
   "./index.html",
@@ -10,7 +10,8 @@ const ASSETS = [
   "./js/schema.js",
   "./js/store.js",
   "./js/ui.js",
-  "./js/pwa.js"
+  "./js/pwa.js",
+  "./js/sync.js"
 ];
 
 self.addEventListener("install", (event) => {

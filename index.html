@@ -97,6 +97,44 @@
         <button id="btn-export" class="ghost-btn" type="button">导出 JSON</button>
         <button id="btn-import" class="ghost-btn" type="button">导入 JSON</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden />
+        <div id="sync-panel" class="sync-panel">
+          <p class="backup-panel__title">云同步 MVP</p>
+          <p id="sync-meta" class="backup-meta muted">未配置。推荐 GitHub Gist（免费、可跨设备）。</p>
+          <label class="sync-field"><span>开关</span>
+            <select id="sync-enabled">
+              <option value="off">关闭</option>
+              <option value="on">开启</option>
+            </select>
+          </label>
+          <label class="sync-field"><span>提供方</span>
+            <select id="sync-provider">
+              <option value="gist">GitHub Gist</option>
+              <option value="http">通用 HTTP</option>
+            </select>
+          </label>
+          <label class="sync-field"><span>Token</span>
+            <input id="sync-token" type="password" autocomplete="off" placeholder="GitHub PAT / Bearer Token" />
+          </label>
+          <label class="sync-field" id="sync-remote-wrap"><span>Gist ID</span>
+            <input id="sync-remote-id" type="text" autocomplete="off" placeholder="可空：首次推送自动创建" />
+          </label>
+          <label class="sync-field" id="sync-endpoint-wrap" hidden><span>Endpoint</span>
+            <input id="sync-endpoint" type="text" autocomplete="off" placeholder="https://example.com/nova-todo-sync" />
+          </label>
+          <label class="sync-field"><span>自动同步</span>
+            <select id="sync-autosync">
+              <option value="off">手动</option>
+              <option value="on">开启（定时）</option>
+            </select>
+          </label>
+          <div class="backup-actions">
+            <button id="btn-sync-now" class="primary-btn" type="button">立即同步</button>
+            <button id="btn-sync-push" class="ghost-btn" type="button">仅推送</button>
+            <button id="btn-sync-pull" class="ghost-btn" type="button">仅拉取</button>
+            <button id="btn-sync-save" class="ghost-btn" type="button">保存配置</button>
+          </div>
+          <p class="field-hint">Token 只存在本机 IndexedDB，不会上传到远端快照。同步前会自动做本地备份。</p>
+        </div>
         <div id="template-panel" class="template-panel">
           <p class="backup-panel__title">任务模板</p>
           <p class="backup-meta muted">一键套用周报、复盘等高频任务</p>
@@ -391,6 +429,7 @@
   <script src="./js/store.js"></script>
   <script src="./js/ui.js"></script>
   <script src="./js/pwa.js"></script>
+  <script src="./js/sync.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>

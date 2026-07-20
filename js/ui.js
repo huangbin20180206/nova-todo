@@ -147,6 +147,20 @@
       templateList: $("#template-list"),
       btnSaveTemplate: $("#btn-save-template"),
       recentSearches: $("#recent-searches"),
+      syncPanel: $("#sync-panel"),
+      syncMeta: $("#sync-meta"),
+      syncEnabled: $("#sync-enabled"),
+      syncProvider: $("#sync-provider"),
+      syncToken: $("#sync-token"),
+      syncRemoteId: $("#sync-remote-id"),
+      syncEndpoint: $("#sync-endpoint"),
+      syncRemoteWrap: $("#sync-remote-wrap"),
+      syncEndpointWrap: $("#sync-endpoint-wrap"),
+      syncAuto: $("#sync-autosync"),
+      btnSyncNow: $("#btn-sync-now"),
+      btnSyncPush: $("#btn-sync-push"),
+      btnSyncPull: $("#btn-sync-pull"),
+      btnSyncSave: $("#btn-sync-save"),
       btnClearCompleted: $("#btn-clear-completed"),
       btnExport: $("#btn-export"),
       btnImport: $("#btn-import"),
@@ -497,6 +511,50 @@
         row.appendChild(delBtn);
         els.templateList.appendChild(row);
       });
+    }
+
+    function formatSyncTime(ts) {
+      if (!ts) return "从未同步";
+      try { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
+      catch (error) { return String(ts); }
+    }
+    function renderSyncPanel(snapshot) {
+      if (!els.syncPanel) return;
+      const sync = (snapshot && snapshot.syncStatus) || {};
+      const provider = sync.provider || "gist";
+      if (els.syncEnabled) els.syncEnabled.value = sync.enabled ? "on" : "off";
+      if (els.syncProvider) els.syncProvider.value = provider;
+      if (els.syncAuto) els.syncAuto.value = sync.autoSync ? "on" : "off";
+      // do not overwrite token/remote while typing if focused
+      const active = document.activeElement;
+      if (els.syncToken && active !== els.syncToken) els.syncToken.value = sync.hasToken ? "********" : "";
+      if (els.syncRemoteId && active !== els.syncRemoteId) els.syncRemoteId.value = sync.remoteId || "";
+      if (els.syncEndpoint && active !== els.syncEndpoint) els.syncEndpoint.value = sync.endpoint || "";
+      if (els.syncRemoteWrap) els.syncRemoteWrap.hidden = provider !== "gist";
+      if (els.syncEndpointWrap) els.syncEndpointWrap.hidden = provider !== "http";
+      if (els.syncMeta) {
+        const bits = [];
+        bits.push(sync.enabled ? "已开启" : "未开启");
+        bits.push(provider === "http" ? "HTTP" : "Gist");
+        if (provider === "gist" && sync.remoteId) bits.push("ID " + sync.remoteId.slice(0, 10) + (sync.remoteId.length > 10 ? "…" : ""));
+        if (provider === "http" && sync.endpoint) bits.push("已配置 Endpoint");
+        bits.push("上次同步：" + formatSyncTime(sync.lastSyncedAt));
+        if (sync.lastResult) bits.push(sync.lastResult);
+        els.syncMeta.textContent = bits.join(" · ");
+      }
+    }
+    function readSyncForm() {
+      const provider = els.syncProvider ? els.syncProvider.value : "gist";
+      const tokenRaw = els.syncToken ? els.syncToken.value : "";
+      const patch = {
+        enabled: !!(els.syncEnabled && els.syncEnabled.value === "on"),
+        provider: provider,
+        autoSync: !!(els.syncAuto && els.syncAuto.value === "on"),
+        remoteId: els.syncRemoteId ? els.syncRemoteId.value.trim() : "",
+        endpoint: els.syncEndpoint ? els.syncEndpoint.value.trim() : ""
+      };
+      if (tokenRaw && tokenRaw !== "********") patch.token = tokenRaw;
+      return patch;
     }
     function openEditor(todo) {
       els.editorId.value = todo ? todo.id : "";
@@ -1317,6 +1375,7 @@
       fillListSelects(snapshot);
       fillBulkSelects(snapshot);
       renderBackupPanel(snapshot);
+      renderSyncPanel(snapshot);
       renderTemplates(snapshot);
       renderRecentSearches(snapshot);
       renderReminderPanel(snapshot);
@@ -1422,6 +1481,44 @@
           if (window.matchMedia("(max-width: 900px)").matches) closeMobileSidebar();
         });
       });
+
+      function bindSyncEvents() {
+        if (els.syncProvider) {
+          els.syncProvider.addEventListener("change", function () {
+            const provider = els.syncProvider.value;
+            if (els.syncRemoteWrap) els.syncRemoteWrap.hidden = provider !== "gist";
+            if (els.syncEndpointWrap) els.syncEndpointWrap.hidden = provider !== "http";
+          });
+        }
+        async function saveSyncConfig(showToast) {
+          const patch = readSyncForm();
+          const result = await store.setSyncConfig(patch);
+          if (showToast) toast(result.ok ? "同步配置已保存" : "保存失败");
+          return result;
+        }
+        if (els.btnSyncSave) {
+          els.btnSyncSave.addEventListener("click", function () { saveSyncConfig(true); });
+        }
+        async function runSync(mode) {
+          if (!syncController) return toast("同步模块未就绪", "error");
+          await saveSyncConfig(false);
+          toast(mode === "pull" ? "正在拉取…" : (mode === "push" ? "正在推送…" : "正在同步…"));
+          try {
+            const result = await syncController.syncNow(mode);
+            if (!result.ok) toast(result.error || "同步失败", "error");
+            else if (mode === "pull") toast("拉取完成" + (result.count != null ? (" · " + result.count + " 条") : ""));
+            else if (mode === "push") toast("推送完成" + (result.remoteId ? (" · Gist " + result.remoteId) : ""));
+            else toast("同步完成" + (result.merged ? "（已合并）" : "（已上传）") + (result.remoteId ? (" · " + result.remoteId) : ""));
+          } catch (error) {
+            console.error(error);
+            toast((error && error.message) || "同步失败", "error");
+          }
+        }
+        if (els.btnSyncNow) els.btnSyncNow.addEventListener("click", function () { runSync("sync"); });
+        if (els.btnSyncPush) els.btnSyncPush.addEventListener("click", function () { runSync("push"); });
+        if (els.btnSyncPull) els.btnSyncPull.addEventListener("click", function () { runSync("pull"); });
+      }
+      bindSyncEvents();
 
       if (els.btnReminderRefresh) {
         els.btnReminderRefresh.addEventListener("click", function () {
@@ -1920,11 +2017,15 @@
       });
     }
 
+    let syncController = null;
+    function setSyncController(controller) { syncController = controller; }
+
     return {
       bindEvents: bindEvents,
       render: render,
       toast: toast,
       openEditor: openEditor,
+      setSyncController: setSyncController,
     };
   }
 

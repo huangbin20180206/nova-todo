@@ -21,8 +21,12 @@
 
     const store = window.NovaStore.createStore(window.NovaDB);
     const ui = window.NovaUI.createUI(store);
+    const sync = (window.NovaSync && window.NovaSync.createSync)
+      ? window.NovaSync.createSync(store, { toast: function (msg) { ui.toast(msg); } })
+      : null;
 
     ui.bindEvents();
+    if (sync && ui.setSyncController) ui.setSyncController(sync);
     store.subscribe(function (snapshot) {
       ui.render(snapshot);
     });
@@ -58,6 +62,19 @@
 
       const input = document.querySelector("#quick-input");
       if (input) input.focus();
+
+      // optional auto sync every 15 min when enabled
+      if (sync) {
+        setInterval(function () {
+          const cfg = sync.getConfig();
+          if (!cfg.enabled || !cfg.autoSync) return;
+          if (!cfg.token && cfg.provider === "gist") return;
+          if (cfg.provider === "http" && !cfg.endpoint) return;
+          sync.syncNow("sync").catch(function (error) {
+            console.warn("auto sync failed", error);
+          });
+        }, 15 * 60 * 1000);
+      }
     } catch (error) {
       console.error(error);
       ui.toast("初始化失败，请刷新重试", "error");
