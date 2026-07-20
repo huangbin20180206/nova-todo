@@ -53,8 +53,26 @@ function assert(cond, msg){ if(!cond) throw new Error(msg); }
   const bak = await store.createBackup('wave3');
   assert(bak.ok, 'backup');
   if (bak.backup && bak.backup.settings && bak.backup.settings.sync && bak.backup.settings.sync.token) throw new Error('backup token leak');
+  // calendar week/month views
+  const due = store.todayKey();
+  const c1 = await store.addTodo({ text: '周视图任务', dueDate: due, priority: 'high' });
+  assert(c1.ok, 'create calendar todo');
+  await store.setSettings({ view: 'week', calendarAnchor: due, search: '', activeTag: '', activeListId: 'all' });
+  snap = store.getSnapshot();
+  assert(snap.calendar && snap.calendar.mode === 'week', 'week calendar mode');
+  assert((snap.calendar.days||[]).length === 7, 'week has 7 days');
+  assert((snap.calendar.days||[]).some(day => (day.todos||[]).some(t => t.id === c1.todo.id)), 'week calendar includes todo');
+  assert((snap.visibleTodos||[]).some(t => t.id === c1.todo.id), 'week visible includes todo');
+  await store.setSettings({ view: 'month', calendarAnchor: due, search: '', activeTag: '', activeListId: 'all' });
+  snap = store.getSnapshot();
+  assert(snap.calendar && snap.calendar.mode === 'month', 'month calendar mode');
+  assert((snap.calendar.days||[]).length === 42, 'month grid 42');
+  await store.shiftCalendar(1);
+  snap = store.getSnapshot();
+  assert(!!snap.settings.calendarAnchor, 'calendar shifted');
+
   await store.deleteTodo(created.todo.id);
   snap = store.getSnapshot();
   assert((snap.tombstones||[]).some(t => t.id === created.todo.id), 'todo tombstone');
-  console.log(JSON.stringify({ ok:true, schemaVersion: snap.schemaVersion, todos: snap.todos.length, tombstones: snap.tombstones.length }, null, 2));
+  console.log(JSON.stringify({ ok:true, schemaVersion: snap.schemaVersion, todos: snap.todos.length, tombstones: snap.tombstones.length, calendar: snap.calendar && snap.calendar.mode }, null, 2));
 })().catch(err => { console.error('FAIL', err); process.exit(1); });

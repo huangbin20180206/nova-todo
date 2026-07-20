@@ -21,6 +21,8 @@
     active: { label: "进行中", icon: "🚀" },
     completed: { label: "已完成", icon: "✅" },
     today: { label: "今日到期", icon: "📅" },
+    week: { label: "周视图", icon: "🗓️" },
+    month: { label: "月视图", icon: "📆" },
     overdue: { label: "已逾期", icon: "⏰" },
     scheduled: { label: "重复任务", icon: "🔁" },
     archived: { label: "归档", icon: "📦" },
@@ -78,6 +80,12 @@
   function createUI(store) {
     const els = {
       board: $("#todo-board"),
+      calendarBoard: $("#calendar-board"),
+      calendarToolbar: $("#calendar-toolbar"),
+      calendarRange: $("#calendar-range"),
+      btnCalPrev: $("#btn-cal-prev"),
+      btnCalToday: $("#btn-cal-today"),
+      btnCalNext: $("#btn-cal-next"),
       empty: $("#empty-state"),
       emptyIcon: $("#empty-icon"),
       emptyEyebrow: $("#empty-eyebrow"),
@@ -1225,6 +1233,20 @@
           text: "给重要事项加上截止日期，今天的焦点会更清楚。",
           action: "新建任务",
         },
+        week: {
+          icon: "🗓️",
+          eyebrow: "This Week",
+          title: "本周还没有安排任务",
+          text: "给任务设置本周内的截止日期，就会出现在周视图里。",
+          action: "新建任务",
+        },
+        month: {
+          icon: "📆",
+          eyebrow: "This Month",
+          title: "本月还没有安排任务",
+          text: "把月度事项补上截止日期，月视图会更有全局感。",
+          action: "新建任务",
+        },
         overdue: {
           icon: "😎",
           eyebrow: "Nice",
@@ -1345,14 +1367,119 @@
       });
     }
 
+    function openQuickCreateWithDate(dateKey) {
+      if (els.quickInput) {
+        const prefix = dateKey ? (dateKey + " ") : "";
+        if (!els.quickInput.value) els.quickInput.value = prefix;
+        els.quickInput.focus();
+      }
+      if (dateKey) toast("已定位到 " + dateKey + "，可快速创建任务");
+    }
+
+    function renderCalendarBoard(snapshot) {
+      if (!els.calendarBoard) return;
+      const cal = snapshot.calendar;
+      const isCal = snapshot.settings.view === "week" || snapshot.settings.view === "month";
+      els.calendarBoard.hidden = !isCal || !cal;
+      if (els.calendarToolbar) els.calendarToolbar.hidden = !isCal || !cal;
+      if (!isCal || !cal) {
+        els.calendarBoard.innerHTML = "";
+        return;
+      }
+      if (els.calendarRange) els.calendarRange.textContent = cal.label || "";
+      els.calendarBoard.dataset.mode = cal.mode;
+      els.calendarBoard.innerHTML = "";
+      const today = store.todayKey();
+      (cal.days || []).forEach(function (day) {
+        const cell = document.createElement("article");
+        cell.className = "calendar-day" + (day.isToday ? " is-today" : "") + (day.inMonth === false ? " is-outside" : "");
+        const head = document.createElement("div");
+        head.className = "calendar-day__head";
+        const title = document.createElement("div");
+        title.className = "calendar-day__title";
+        title.textContent = (day.label ? (day.label + " ") : "") + (day.day || "");
+        const count = document.createElement("div");
+        count.className = "calendar-day__count";
+        const total = day.total != null ? day.total : ((day.todos || []).length);
+        count.textContent = total ? (total + " 项") : "空";
+        head.appendChild(title);
+        head.appendChild(count);
+        head.addEventListener("dblclick", function () {
+          openQuickCreateWithDate(day.key);
+        });
+        const list = document.createElement("div");
+        list.className = "calendar-day__list";
+        const todos = day.todos || [];
+        if (!todos.length) {
+          const empty = document.createElement("div");
+          empty.className = "calendar-empty";
+          empty.textContent = "点击快速添加";
+          empty.addEventListener("click", function () { openQuickCreateWithDate(day.key); });
+          list.appendChild(empty);
+        } else {
+          todos.forEach(function (todo) {
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "calendar-chip" + (todo.completed ? " is-done" : "") + ((todo.dueDate && todo.dueDate < today && !todo.completed) ? " is-overdue" : "");
+            const priority = priorityIcon(todo.priority) + " ";
+            chip.innerHTML = "<span>" + priority + escapeHtml(todo.text || "") + "</span>" +
+              (todo.remindEnabled ? '<span class="calendar-chip__meta">⏰ ' + escapeHtml(todo.remindTime || "09:00") + "</span>" : "");
+            chip.addEventListener("click", function () {
+              const full = (snapshot.todos || []).find(function (item) { return item.id === todo.id; }) || todo;
+              openEditor(full);
+            });
+            list.appendChild(chip);
+          });
+          if (day.total > todos.length) {
+            const more = document.createElement("button");
+            more.type = "button";
+            more.className = "calendar-day__more";
+            more.textContent = "还有 " + (day.total - todos.length) + " 项 · 查看当天";
+            more.addEventListener("click", function () {
+              store.setSettings({ view: "all", search: day.key, activeTag: "" });
+              toast("已筛选 " + day.key + " 的任务");
+            });
+            list.appendChild(more);
+          }
+        }
+        cell.appendChild(head);
+        cell.appendChild(list);
+        els.calendarBoard.appendChild(cell);
+      });
+      if ((cal.undated || []).length) {
+        const box = document.createElement("section");
+        box.className = "calendar-undated";
+        box.innerHTML = '<div class="calendar-undated__title">未设置日期（' + cal.undated.length + '）</div>';
+        const wrap = document.createElement("div");
+        wrap.className = "calendar-undated__list";
+        cal.undated.slice(0, 12).forEach(function (todo) {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "calendar-chip";
+          chip.textContent = todo.text;
+          chip.addEventListener("click", function () { openEditor(todo); });
+          wrap.appendChild(chip);
+        });
+        box.appendChild(wrap);
+        els.calendarBoard.appendChild(box);
+      }
+    }
+
     function renderBoard(snapshot) {
       const list = snapshot.visibleTodos || [];
-      els.board.innerHTML = "";
-      list.forEach(function (todo, index) {
-        const card = createCard(todo, snapshot);
-        card.style.animationDelay = Math.min(index * 0.03, 0.24) + "s";
-        els.board.appendChild(card);
-      });
+      const isCal = snapshot.settings.view === "week" || snapshot.settings.view === "month";
+      if (els.board) els.board.hidden = !!isCal;
+      if (els.board) {
+        els.board.innerHTML = "";
+        if (!isCal) {
+          list.forEach(function (todo, index) {
+            const card = createCard(todo, snapshot);
+            card.style.animationDelay = Math.min(index * 0.03, 0.24) + "s";
+            els.board.appendChild(card);
+          });
+        }
+      }
+      renderCalendarBoard(snapshot);
       renderEmptyState(snapshot, list);
       renderFocus(snapshot);
       renderActiveFilters(snapshot);
@@ -1373,6 +1500,7 @@
       }
       if (snapshot.settings.activeTag) parts.push("标签 🏷️ " + snapshot.settings.activeTag);
       if (snapshot.settings.search) parts.push("搜索 “" + snapshot.settings.search + "”");
+      if (snapshot.calendar && snapshot.calendar.label) parts.push(snapshot.calendar.label);
       if (snapshot.settings.view === "all" && (snapshot.focusTodos || []).length) {
         parts.push("焦点 " + snapshot.focusTodos.length + " 项");
       }
@@ -1436,8 +1564,19 @@
     function bindEvents() {
       $all(".nav-item").forEach(function (btn) {
         btn.addEventListener("click", function () {
-          store.setSettings({ view: btn.getAttribute("data-view") });
+          const view = btn.getAttribute("data-view");
+          const patch = { view: view };
+          if ((view === "week" || view === "month") && !store.getSnapshot().settings.calendarAnchor) {
+            patch.calendarAnchor = store.todayKey();
+          }
+          store.setSettings(patch);
         });
+      });
+      if (els.btnCalPrev) els.btnCalPrev.addEventListener("click", function () { store.shiftCalendar(-1); });
+      if (els.btnCalNext) els.btnCalNext.addEventListener("click", function () { store.shiftCalendar(1); });
+      if (els.btnCalToday) els.btnCalToday.addEventListener("click", function () {
+        const view = (latestSnapshot && latestSnapshot.settings && latestSnapshot.settings.view) || "week";
+        store.setSettings({ calendarAnchor: store.todayKey(), view: (view === "month" ? "month" : "week") });
       });
 
       let searchTimer = null;

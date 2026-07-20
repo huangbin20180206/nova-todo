@@ -44,6 +44,12 @@
         <button class="nav-item" data-view="today" type="button">
           <span class="nav-label"><span class="nav-icon" aria-hidden="true">📅</span><span>今日到期</span></span><span class="nav-count" data-count="today">0</span>
         </button>
+        <button class="nav-item" data-view="week" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">🗓️</span><span>周视图</span></span><span class="nav-count" data-count="week">0</span>
+        </button>
+        <button class="nav-item" data-view="month" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">📆</span><span>月视图</span></span><span class="nav-count" data-count="month">0</span>
+        </button>
         <button class="nav-item" data-view="overdue" type="button">
           <span class="nav-label"><span class="nav-icon" aria-hidden="true">⏰</span><span>已逾期</span></span><span class="nav-count" data-count="overdue">0</span>
         </button>
@@ -240,8 +246,17 @@
           <h2 id="view-title">全部任务</h2>
           <p id="view-subtitle" class="muted">本地 IndexedDB · 可扩展数据层</p>
         </div>
-        <p id="result-meta" class="muted">0 项</p>
+        <div class="list-header__right">
+          <div id="calendar-toolbar" class="calendar-toolbar" hidden>
+            <button id="btn-cal-prev" class="ghost-btn" type="button" aria-label="上一段">‹</button>
+            <button id="btn-cal-today" class="ghost-btn" type="button">今天</button>
+            <button id="btn-cal-next" class="ghost-btn" type="button" aria-label="下一段">›</button>
+            <span id="calendar-range" class="calendar-range muted"></span>
+          </div>
+          <p id="result-meta" class="muted">0 项</p>
+        </div>
       </section>
+      <section id="calendar-board" class="calendar-board" hidden aria-live="polite"></section>
       <section id="active-filters" class="active-filters" hidden>
         <div id="active-filters-list" class="active-filters__list"></div>
         <button id="btn-clear-filters" class="ghost-btn" type="button">清除筛选</button>

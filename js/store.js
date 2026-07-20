@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
   const PRIORITY_RANK = { urgent: 4, high: 3, medium: 2, low: 1 };
-  const VIEW_LABELS = { all: "全部任务", active: "进行中", completed: "已完成", today: "今日到期", overdue: "已逾期", archived: "归档", scheduled: "重复任务" };
+  const VIEW_LABELS = { all: "全部任务", active: "进行中", completed: "已完成", today: "今日到期", week: "周视图", month: "月视图", overdue: "已逾期", archived: "归档", scheduled: "重复任务" };
   const REPEAT_OPTIONS = ["none", "daily", "weekly", "monthly"];
   const TAG_PALETTE = [
     { bg: "rgba(109, 124, 255, 0.18)", border: "rgba(109, 124, 255, 0.42)", text: "#c7d2fe" },
@@ -15,6 +15,43 @@
   ];
   function createId(){ if(global.crypto&&typeof global.crypto.randomUUID==="function") return global.crypto.randomUUID(); return "id-"+Date.now()+"-"+Math.random().toString(16).slice(2); }
   function todayKey(date){ const d=date?new Date(date):new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+  function parseDateKey(dateStr){
+    if(typeof dateStr!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+    const d=new Date(dateStr+"T00:00:00");
+    return Number.isNaN(d.getTime())?null:d;
+  }
+  function startOfWeek(dateStr){
+    const d=parseDateKey(dateStr)||new Date();
+    const day=d.getDay(); // 0 Sun
+    const diff=(day+6)%7; // Monday-first
+    d.setDate(d.getDate()-diff);
+    return todayKey(d);
+  }
+  function startOfMonth(dateStr){
+    const d=parseDateKey(dateStr)||new Date();
+    d.setDate(1);
+    return todayKey(d);
+  }
+  function shiftMonths(dateStr, months){
+    const d=parseDateKey(dateStr)||new Date();
+    const day=d.getDate();
+    d.setMonth(d.getMonth()+months);
+    if(d.getDate()<day) d.setDate(0);
+    return todayKey(d);
+  }
+  function formatMonthLabel(dateStr){
+    const d=parseDateKey(dateStr)||new Date();
+    return d.getFullYear()+"年"+String(d.getMonth()+1).padStart(2,"0")+"月";
+  }
+  function formatWeekLabel(startKey){
+    const endKey=addDays(startKey,6);
+    return startKey.replace(/-/g,".")+" - "+endKey.replace(/-/g,".");
+  }
+  function weekdayLabel(dateStr){
+    const labels=["日","一","二","三","四","五","六"];
+    const d=parseDateKey(dateStr);
+    return d?("周"+labels[d.getDay()]):"";
+  }
   function uniqueTags(tags){ const seen=new Set(); const result=[]; (tags||[]).forEach(function(tag){ const cleaned=String(tag||"").trim().replace(/\s+/g," "); if(!cleaned) return; const key=cleaned.toLowerCase(); if(seen.has(key)) return; seen.add(key); result.push(cleaned); }); return result.slice(0,12); }
   function normalizeTags(input){ if(Array.isArray(input)) return uniqueTags(input); if(typeof input!=="string") return []; return uniqueTags(input.split(/[,，]/).map(function(tag){return tag.trim();}).filter(Boolean)); }
   function hashString(input){ let hash=0; const text=String(input||""); for(let i=0;i<text.length;i+=1){ hash=((hash<<5)-hash)+text.charCodeAt(i); hash|=0; } return Math.abs(hash); }
@@ -193,7 +230,7 @@
     return { ok:true, error:"", payload:payload, tokens:tokens };
   }
   function normalizeTodo(raw,index,fallbackListId){ const now=Date.now(); const text=String((raw&&raw.text)||"").trim(); return {id:raw&&typeof raw.id==="string"&&raw.id?raw.id:createId(),text:text,notes:String((raw&&raw.notes)||"").trim(),subtasks:normalizeSubtasks(raw&&raw.subtasks),completed:!!(raw&&raw.completed),archived:!!(raw&&raw.archived),pinned:!!(raw&&raw.pinned),priority:normalizePriority(raw&&raw.priority),dueDate:raw&&typeof raw.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dueDate)?raw.dueDate:null,tags:normalizeTags(raw&&raw.tags),listId:raw&&typeof raw.listId==="string"&&raw.listId?raw.listId:(fallbackListId||"list-inbox"),repeat:normalizeRepeat(raw&&raw.repeat),remindEnabled:!!(raw&&raw.remindEnabled),remindTime:normalizeRemindTime(raw&&raw.remindTime),lastNotifiedKey:raw&&typeof raw.lastNotifiedKey==="string"?raw.lastNotifiedKey:null,completedAt:typeof (raw&&raw.completedAt)==="number"?raw.completedAt:null,order:typeof (raw&&raw.order)==="number"?raw.order:index||now,createdAt:typeof (raw&&raw.createdAt)==="number"?raw.createdAt:now,updatedAt:typeof (raw&&raw.updatedAt)==="number"?raw.updatedAt:now}; }
-  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null,recentSearches:[],sync:{enabled:false,provider:"gist",token:"",remoteId:"",endpoint:"",autoSync:false,autoSyncInterval:0,lastSyncedAt:null,lastRemoteUpdatedAt:null,deviceId:null,lastResult:"",lastConflicts:[],method:"PUT"}}; }
+  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",calendarAnchor:null,notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null,recentSearches:[],sync:{enabled:false,provider:"gist",token:"",remoteId:"",endpoint:"",autoSync:false,autoSyncInterval:0,lastSyncedAt:null,lastRemoteUpdatedAt:null,deviceId:null,lastResult:"",lastConflicts:[],method:"PUT"}}; }
 
   function createStore(db){
     const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],templates:[],ready:false,history:[],selectedIds:[],backupPoints:[],tombstones:[]};
@@ -203,11 +240,56 @@
     function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice(), subtasks: (todo.subtasks||[]).map(function(s){ return Object.assign({}, s); }) }); }); }
     function pushHistory(label){ state.history.push({ label: label || "变更", todos: cloneTodos(), selectedIds: state.selectedIds.slice(), at: Date.now() }); if (state.history.length > 30) state.history.shift(); }
     async function restoreTodos(todos){ state.todos = (todos || []).map(function(item, index){ return normalizeTodo(item, index, state.lists[0].id); }); await db.clearTodos(); if (state.todos.length) await db.putTodos(state.todos); }
-    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,schemaVersion:(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||4,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),tombstones:(state.tombstones||[]).slice(),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8),syncStatus:(function(){ const s=Object.assign({}, defaultSettings().sync, (state.settings&&state.settings.sync)||{}); return {enabled:!!s.enabled,provider:s.provider||"gist",remoteId:s.remoteId||"",endpoint:s.endpoint||"",autoSync:!!s.autoSync,autoSyncInterval:Number(s.autoSyncInterval||0)||0,lastSyncedAt:s.lastSyncedAt||null,lastRemoteUpdatedAt:s.lastRemoteUpdatedAt||null,lastResult:s.lastResult||"",lastConflicts:Array.isArray(s.lastConflicts)?s.lastConflicts.slice(0,20):[],hasToken:!!s.token,deviceId:s.deviceId||null,tombstoneCount:(state.tombstones||[]).length}; })()}; }
+    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,schemaVersion:(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||4,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),calendar:getCalendarModel(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),tombstones:(state.tombstones||[]).slice(),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8),syncStatus:(function(){ const s=Object.assign({}, defaultSettings().sync, (state.settings&&state.settings.sync)||{}); return {enabled:!!s.enabled,provider:s.provider||"gist",remoteId:s.remoteId||"",endpoint:s.endpoint||"",autoSync:!!s.autoSync,autoSyncInterval:Number(s.autoSyncInterval||0)||0,lastSyncedAt:s.lastSyncedAt||null,lastRemoteUpdatedAt:s.lastRemoteUpdatedAt||null,lastResult:s.lastResult||"",lastConflicts:Array.isArray(s.lastConflicts)?s.lastConflicts.slice(0,20):[],hasToken:!!s.token,deviceId:s.deviceId||null,tombstoneCount:(state.tombstones||[]).length}; })()}; }
     function subscribe(fn){ listeners.add(fn); return function(){ listeners.delete(fn); }; }
     function listExists(id){ return state.lists.some(function(list){return list.id===id;}); }
     function ensureListId(listId){ if(listId&&listExists(listId)) return listId; return state.lists[0]?state.lists[0].id:"list-inbox"; }
-    function getCounts(){ const activeListId=state.settings.activeListId||"all"; const inList=function(todo){return activeListId==="all"||todo.listId===activeListId;}; const base=state.todos.filter(function(todo){return !todo.archived&&inList(todo);}); const archived=state.todos.filter(function(todo){return todo.archived&&inList(todo);}); const today=todayKey(); return {all:base.length,active:base.filter(function(todo){return !todo.completed;}).length,completed:base.filter(function(todo){return todo.completed;}).length,today:base.filter(function(todo){return !todo.completed&&todo.dueDate===today;}).length,overdue:base.filter(function(todo){return !todo.completed&&todo.dueDate&&todo.dueDate<today;}).length,archived:archived.length,scheduled:base.filter(function(todo){return !todo.completed&&todo.repeat&&todo.repeat!=="none";}).length}; }
+    function getCalendarAnchor(){
+      const raw=state.settings.calendarAnchor;
+      if(typeof raw==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+      return todayKey();
+    }
+    function getWeekRange(anchor){
+      const start=startOfWeek(anchor||getCalendarAnchor());
+      return { start:start, end:addDays(start,6) };
+    }
+    function getMonthGrid(anchor){
+      const monthStart=startOfMonth(anchor||getCalendarAnchor());
+      const gridStart=startOfWeek(monthStart);
+      const days=[];
+      for(let i=0;i<42;i+=1){
+        const key=addDays(gridStart,i);
+        const d=parseDateKey(key);
+        days.push({
+          key:key,
+          inMonth: d && d.getMonth()===(parseDateKey(monthStart).getMonth()),
+          weekday: weekdayLabel(key),
+          day: d?d.getDate():0
+        });
+      }
+      return { monthStart:monthStart, gridStart:gridStart, days:days, label:formatMonthLabel(monthStart) };
+    }
+    function getCounts(){
+      const activeListId=state.settings.activeListId||"all";
+      const inList=function(todo){return activeListId==="all"||todo.listId===activeListId;};
+      const base=state.todos.filter(function(todo){return !todo.archived&&inList(todo);});
+      const archived=state.todos.filter(function(todo){return todo.archived&&inList(todo);});
+      const today=todayKey();
+      const week=getWeekRange(getCalendarAnchor());
+      const month=getMonthGrid(getCalendarAnchor());
+      const monthEnd=addDays(month.days[month.days.length-1].key,0);
+      return {
+        all:base.length,
+        active:base.filter(function(todo){return !todo.completed;}).length,
+        completed:base.filter(function(todo){return todo.completed;}).length,
+        today:base.filter(function(todo){return !todo.completed&&todo.dueDate===today;}).length,
+        week:base.filter(function(todo){return !todo.completed&&todo.dueDate&&todo.dueDate>=week.start&&todo.dueDate<=week.end;}).length,
+        month:base.filter(function(todo){ const monthEnd=addDays(shiftMonths(month.monthStart,1),-1); return !todo.completed&&todo.dueDate&&todo.dueDate>=month.monthStart&&todo.dueDate<=monthEnd; }).length,
+        overdue:base.filter(function(todo){return !todo.completed&&todo.dueDate&&todo.dueDate<today;}).length,
+        archived:archived.length,
+        scheduled:base.filter(function(todo){return !todo.completed&&todo.repeat&&todo.repeat!=="none";}).length
+      };
+    }
     function getListCounts(){ const map={}; state.lists.forEach(function(list){map[list.id]=0;}); state.todos.forEach(function(todo){ if(todo.archived||todo.completed) return; if(map[todo.listId]==null) map[todo.listId]=0; map[todo.listId]+=1; }); return map; }
     function getUsageMap(){ const map=new Map(); state.todos.forEach(function(todo){ (todo.tags||[]).forEach(function(tag){ map.set(tag,(map.get(tag)||0)+1); }); }); return map; }
     function getTagStats(){ const map=new Map(); state.todos.forEach(function(todo){ if(todo.archived) return; todo.tags.forEach(function(tag){ map.set(tag,(map.get(tag)||0)+1); }); }); state.tagLibrary.forEach(function(tag){ if(!map.has(tag)) map.set(tag,0); }); return Array.from(map.entries()).map(function(entry){ return {name:entry[0],count:entry[1],color:tagColor(entry[0])}; }).sort(function(a,b){ return b.count-a.count||a.name.localeCompare(b.name,"zh-CN"); }); }
@@ -272,9 +354,99 @@
     function ensureTagsInLibrary(tags){ const incoming=normalizeTags(tags); if(!incoming.length) return false; const existing=new Set(state.tagLibrary.map(function(tag){return tag.toLowerCase();})); let changed=false; incoming.forEach(function(tag){ if(!existing.has(tag.toLowerCase())){ state.tagLibrary.push(tag); existing.add(tag.toLowerCase()); changed=true; } }); if(changed) state.tagLibrary=uniqueTags(state.tagLibrary).sort(function(a,b){return a.localeCompare(b,"zh-CN");}); return changed; }
     function getStats(){ const activeListId=state.settings.activeListId||"all"; const live=state.todos.filter(function(todo){ return !todo.archived&&(activeListId==="all"||todo.listId===activeListId); }); const total=live.length; const completed=live.filter(function(todo){return todo.completed;}).length; const high=live.filter(function(todo){return !todo.completed&&(todo.priority==="high"||todo.priority==="urgent");}).length; const today=todayKey(); const dueSoon=live.filter(function(todo){ if(todo.completed||!todo.dueDate) return false; const diff=(new Date(todo.dueDate+"T00:00:00")-new Date(today+"T00:00:00"))/86400000; return diff>=0&&diff<=3; }).length; const repeating=live.filter(function(todo){return !todo.completed&&todo.repeat&&todo.repeat!=="none";}).length; return {completion:total?Math.round((completed/total)*100):0,high:high,dueSoon:dueSoon,repeating:repeating}; }
     function getFocusTodos(){ const today=todayKey(); const activeListId=state.settings.activeListId||"all"; return state.todos.filter(function(todo){ if(todo.archived||todo.completed) return false; if(activeListId!=="all"&&todo.listId!==activeListId) return false; const isOverdue=!!todo.dueDate&&todo.dueDate<today; const isToday=todo.dueDate===today; const isHot=todo.priority==="urgent"||todo.priority==="high"; const isRemindToday=todo.remindEnabled&&todo.dueDate===today; return isOverdue||isToday||isHot||isRemindToday; }).sort(function(a,b){ const aOverdue=a.dueDate&&a.dueDate<today?0:1; const bOverdue=b.dueDate&&b.dueDate<today?0:1; if(aOverdue!==bOverdue) return aOverdue-bOverdue; const aToday=a.dueDate===today?0:1; const bToday=b.dueDate===today?0:1; if(aToday!==bToday) return aToday-bToday; const pr=(PRIORITY_RANK[b.priority]||0)-(PRIORITY_RANK[a.priority]||0); if(pr) return pr; if(a.dueDate&&b.dueDate) return a.dueDate.localeCompare(b.dueDate); if(a.dueDate) return -1; if(b.dueDate) return 1; return a.order-b.order; }).slice(0,5); }
-    function matchesView(todo,view){ const today=todayKey(); if(view==="archived") return todo.archived; if(todo.archived) return false; if(view==="active") return !todo.completed; if(view==="completed") return todo.completed; if(view==="today") return !todo.completed&&todo.dueDate===today; if(view==="overdue") return !todo.completed&&!!todo.dueDate&&todo.dueDate<today; if(view==="scheduled") return !todo.completed&&todo.repeat&&todo.repeat!=="none"; return true; }
+    function matchesView(todo,view){
+      const today=todayKey();
+      if(view==="archived") return todo.archived;
+      if(todo.archived) return false;
+      if(view==="active") return !todo.completed;
+      if(view==="completed") return todo.completed;
+      if(view==="today") return !todo.completed&&todo.dueDate===today;
+      if(view==="week"){
+        if(todo.completed||!todo.dueDate) return false;
+        const range=getWeekRange(getCalendarAnchor());
+        return todo.dueDate>=range.start&&todo.dueDate<=range.end;
+      }
+      if(view==="month"){
+        if(todo.completed||!todo.dueDate) return false;
+        const monthStart=startOfMonth(getCalendarAnchor());
+        const monthEnd=addDays(shiftMonths(monthStart,1),-1);
+        return todo.dueDate>=monthStart&&todo.dueDate<=monthEnd;
+      }
+      if(view==="overdue") return !todo.completed&&!!todo.dueDate&&todo.dueDate<today;
+      if(view==="scheduled") return !todo.completed&&todo.repeat&&todo.repeat!=="none";
+      return true;
+    }
     function sortTodos(list,sort){ const cloned=list.slice(); function pinFirst(cmp){ return function(a,b){ const pin=(b.pinned?1:0)-(a.pinned?1:0); if(pin) return pin; return cmp(a,b); }; } if(sort==="created_desc") return cloned.sort(pinFirst(function(a,b){return b.createdAt-a.createdAt;})); if(sort==="due_asc") return cloned.sort(pinFirst(function(a,b){ if(!a.dueDate&&!b.dueDate) return a.order-b.order; if(!a.dueDate) return 1; if(!b.dueDate) return -1; return a.dueDate.localeCompare(b.dueDate)||a.order-b.order; })); if(sort==="priority_desc") return cloned.sort(pinFirst(function(a,b){ return (PRIORITY_RANK[b.priority]||0)-(PRIORITY_RANK[a.priority]||0)||a.order-b.order; })); if(sort==="alpha_asc") return cloned.sort(pinFirst(function(a,b){ return a.text.localeCompare(b.text,"zh-CN")||a.order-b.order; })); return cloned.sort(pinFirst(function(a,b){return a.order-b.order;})); }
-    function getVisibleTodos(){ const settings=state.settings; const keyword=(settings.search||"").trim().toLowerCase(); const activeListId=settings.activeListId||"all"; let list=state.todos.filter(function(todo){ if(activeListId!=="all"&&todo.listId!==activeListId) return false; if(!matchesView(todo,settings.view)) return false; if(settings.activeTag&&todo.tags.map(function(tag){return tag.toLowerCase();}).indexOf(settings.activeTag.toLowerCase())===-1) return false; if(!keyword) return true; const listName=(state.lists.find(function(item){return item.id===todo.listId;})||{}).name||""; const subText=(todo.subtasks||[]).map(function(s){return s.text||"";}).join(" "); const hay=[todo.text,todo.notes,listName,subText].concat(todo.tags).join(" ").toLowerCase(); return hay.indexOf(keyword)!==-1; }); return sortTodos(list,settings.sort); }
+    function getVisibleTodos(){ const settings=state.settings; const keyword=(settings.search||"").trim().toLowerCase(); const activeListId=settings.activeListId||"all"; let list=state.todos.filter(function(todo){ if(activeListId!=="all"&&todo.listId!==activeListId) return false; if(!matchesView(todo,settings.view)) return false; if(settings.activeTag&&todo.tags.map(function(tag){return tag.toLowerCase();}).indexOf(settings.activeTag.toLowerCase())===-1) return false; if(!keyword) return true; const listName=(state.lists.find(function(item){return item.id===todo.listId;})||{}).name||""; const subText=(todo.subtasks||[]).map(function(s){return s.text||"";}).join(" "); const hay=[todo.text,todo.notes,listName,subText,todo.dueDate||""].concat(todo.tags).join(" ").toLowerCase(); return hay.indexOf(keyword)!==-1; }); return sortTodos(list,settings.sort); }
+    function filterBoardTodos(list){
+      const settings=state.settings;
+      const keyword=(settings.search||"").trim().toLowerCase();
+      const activeListId=settings.activeListId||"all";
+      return (list||[]).filter(function(todo){
+        if(todo.archived) return false;
+        if(activeListId!=="all"&&todo.listId!==activeListId) return false;
+        if(settings.activeTag&&todo.tags.map(function(tag){return tag.toLowerCase();}).indexOf(settings.activeTag.toLowerCase())===-1) return false;
+        if(!keyword) return true;
+        const listName=(state.lists.find(function(item){return item.id===todo.listId;})||{}).name||"";
+        const subText=(todo.subtasks||[]).map(function(s){return s.text||"";}).join(" ");
+        const hay=[todo.text,todo.notes,listName,subText,todo.dueDate||""].concat(todo.tags).join(" ").toLowerCase();
+        return hay.indexOf(keyword)!==-1;
+      });
+    }
+    function getCalendarModel(){
+      const view=state.settings.view;
+      if(view!=="week"&&view!=="month") return null;
+      const today=todayKey();
+      const anchor=getCalendarAnchor();
+      const todos=filterBoardTodos(state.todos.filter(function(todo){ return !todo.archived; }));
+      const byDate={};
+      todos.forEach(function(todo){
+        if(!todo.dueDate) return;
+        if(!byDate[todo.dueDate]) byDate[todo.dueDate]=[];
+        byDate[todo.dueDate].push(todo);
+      });
+      Object.keys(byDate).forEach(function(key){ byDate[key]=sortTodos(byDate[key],"due_asc"); });
+      if(view==="week"){
+        const range=getWeekRange(anchor);
+        const days=[];
+        for(let i=0;i<7;i+=1){
+          const key=addDays(range.start,i);
+          days.push({
+            key:key,
+            label:weekdayLabel(key),
+            day: (parseDateKey(key)||new Date()).getDate(),
+            isToday:key===today,
+            todos:(byDate[key]||[]).slice()
+          });
+        }
+        return {
+          mode:"week",
+          anchor:anchor,
+          start:range.start,
+          end:range.end,
+          label:formatWeekLabel(range.start),
+          days:days,
+          undated: sortTodos(todos.filter(function(todo){ return !todo.dueDate && !todo.completed; }), state.settings.sort || "manual")
+        };
+      }
+      const grid=getMonthGrid(anchor);
+      const days=grid.days.map(function(day){
+        return Object.assign({}, day, {
+          isToday: day.key===today,
+          todos:(byDate[day.key]||[]).slice(0,4),
+          total:(byDate[day.key]||[]).length
+        });
+      });
+      return {
+        mode:"month",
+        anchor:anchor,
+        start:grid.monthStart,
+        end:addDays(shiftMonths(grid.monthStart,1),-1),
+        label:grid.label,
+        days:days,
+        undated: sortTodos(todos.filter(function(todo){ return !todo.dueDate && !todo.completed; }), state.settings.sort || "manual")
+      };
+    }
     function getUpcomingReminders(){
       const today=todayKey();
       const end=addDays(today,7);
@@ -406,7 +578,35 @@
     async function deleteTodo(id){ pushHistory("删除任务"); state.todos=state.todos.filter(function(todo){return todo.id!==id;}); state.selectedIds=state.selectedIds.filter(function(x){return x!==id;}); await db.deleteTodo(id); await recordTombstones("todo", id); emit(); return {ok:true}; }
     async function archiveTodo(id,archived){ if(archived) return updateTodo(id,{archived:true,completed:true}); return updateTodo(id,{archived:false}); }
     async function clearCompleted(){ const activeListId=state.settings.activeListId||"all"; const victims=state.todos.filter(function(todo){ return todo.completed&&!todo.archived&&(activeListId==="all"||todo.listId===activeListId); }); if(!victims.length) return {ok:true,removed:0}; pushHistory("清理已完成"); for(const todo of victims) await db.deleteTodo(todo.id); const victimIds=new Set(victims.map(function(todo){return todo.id;})); state.todos=state.todos.filter(function(todo){return !victimIds.has(todo.id);}); state.selectedIds=state.selectedIds.filter(function(id){return !victimIds.has(id);}); await recordTombstones("todo", victims.map(function(todo){return todo.id;})); emit(); return {ok:true,removed:victims.length}; }
-    async function setSettings(patch){ state.settings=Object.assign({},state.settings,patch); if(state.settings.activeListId!=="all"&&!listExists(state.settings.activeListId)) state.settings.activeListId="all"; await persistSettings(); emit(); return state.settings; }
+    async function setSettings(patch){
+      state.settings=Object.assign({},state.settings,patch);
+      if(state.settings.activeListId!=="all"&&!listExists(state.settings.activeListId)) state.settings.activeListId="all";
+      const allowedViews=["all","active","completed","today","week","month","overdue","scheduled","archived"];
+      if(allowedViews.indexOf(state.settings.view)===-1) state.settings.view="all";
+      if(typeof state.settings.calendarAnchor==="string" && /^\d{4}-\d{2}-\d{2}$/.test(state.settings.calendarAnchor)){
+        // keep
+      } else if(state.settings.view==="week" || state.settings.view==="month"){
+        state.settings.calendarAnchor=todayKey();
+      } else {
+        state.settings.calendarAnchor=state.settings.calendarAnchor || null;
+      }
+      await persistSettings(); emit(); return state.settings;
+    }
+    async function shiftCalendar(delta){
+      delta = Number(delta)||0;
+      const view = state.settings.view;
+      const anchor = getCalendarAnchor();
+      let next = anchor;
+      if(view==="week") next = addDays(startOfWeek(anchor), delta*7);
+      else if(view==="month") next = shiftMonths(startOfMonth(anchor), delta);
+      else next = addDays(anchor, delta);
+      return setSettings({ calendarAnchor: next, view: (view==="week"||view==="month")?view:view });
+    }
+    async function jumpCalendar(dateStr){
+      const key = (typeof dateStr==="string" && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) ? dateStr : todayKey();
+      const view = state.settings.view==="month" ? "month" : "week";
+      return setSettings({ view: view, calendarAnchor: key });
+    }
     async function createList(input){ const name=String((input&&input.name)||"").trim(); if(!name) return {ok:false,error:"请输入清单名称。"}; if(state.lists.some(function(list){return list.name.toLowerCase()===name.toLowerCase();})) return {ok:false,error:"清单已存在。"}; const maxOrder=state.lists.reduce(function(max,list){return Math.max(max,list.order);},0); const list=normalizeList({name:name,icon:(input&&input.icon)||"📁",order:maxOrder+1000},state.lists.length); state.lists.push(list); await persistLists(); emit(); return {ok:true,list:list}; }
     async function renameList(id,name,icon){ const index=state.lists.findIndex(function(list){return list.id===id;}); if(index===-1) return {ok:false,error:"清单不存在。"}; const nextName=String(name||"").trim(); if(!nextName) return {ok:false,error:"清单名称不能为空。"}; state.lists[index]=normalizeList(Object.assign({},state.lists[index],{name:nextName,icon:icon||state.lists[index].icon}),index); await persistLists(); emit(); return {ok:true,list:state.lists[index]}; }
     async function deleteList(id){ if(state.lists.length<=1) return {ok:false,error:"至少保留一个清单。"}; const target=state.lists.find(function(list){return list.id===id;}); if(!target) return {ok:false,error:"清单不存在。"}; const fallback=state.lists.find(function(list){return list.id!==id;}); state.lists=state.lists.filter(function(list){return list.id!==id;}); let changed=false; state.todos=state.todos.map(function(todo){ if(todo.listId!==id) return todo; changed=true; return Object.assign({},todo,{listId:fallback.id,updatedAt:Date.now()}); }); if(state.settings.activeListId===id){ state.settings.activeListId="all"; await persistSettings(); } await persistLists(); if(changed) await db.putTodos(state.todos); await recordTombstones("list", id); emit(); return {ok:true,movedTo:fallback.id}; }
@@ -697,7 +897,7 @@
       return { ok:true, count: result.count || 0 };
     }
     async function setDensity(density){ return setSettings({density: density==="compact"?"compact":"comfortable"}); }
-return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,setSyncConfig:setSyncConfig,getSyncConfig:getSyncConfig,applySyncPayload:applySyncPayload,clearTombstones:clearTombstones,listTombstones:listTombstones,saveTemplate:saveTemplate,deleteTemplate:deleteTemplate,applyTemplate:applyTemplate,pushRecentSearch:pushRecentSearch,clearRecentSearches:clearRecentSearches,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
+return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,shiftCalendar:shiftCalendar,jumpCalendar:jumpCalendar,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,setSyncConfig:setSyncConfig,getSyncConfig:getSyncConfig,applySyncPayload:applySyncPayload,clearTombstones:clearTombstones,listTombstones:listTombstones,saveTemplate:saveTemplate,deleteTemplate:deleteTemplate,applyTemplate:applyTemplate,pushRecentSearch:pushRecentSearch,clearRecentSearches:clearRecentSearches,viewLabels:VIEW_LABELS,todayKey:todayKey,startOfWeek:startOfWeek,startOfMonth:startOfMonth,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
   }
   global.NovaStore={createStore:createStore,normalizeTodo:normalizeTodo,normalizeSubtasks:normalizeSubtasks,parseQuickAdd:parseQuickAdd,defaultSettings:defaultSettings,defaultLists:defaultLists,todayKey:todayKey,tagColor:tagColor,nextDueDate:nextDueDate,subtaskProgress:subtaskProgress};
 })(window);
