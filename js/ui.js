@@ -211,6 +211,11 @@
       editorClose: $("#editor-close"),
       editorArchive: $("#editor-archive"),
       editorDelete: $("#editor-delete"),
+      statDoneToday: $("#stat-done-today"),
+      statActive: $("#stat-active"),
+      progressFill: $("#daily-progress-fill"),
+      progressLabel: $("#daily-progress-label"),
+      btnScrollTop: $("#btn-scroll-top"),
       toastStack: $("#toast-stack"),
     };
 
@@ -218,6 +223,11 @@
     let editorSelectedTags = [];
     let editorSubtasks = [];
     let latestSnapshot = null;
+    let renderRaf = 0;
+    let pendingSnapshot = null;
+    let lastUiSig = "";
+    let searchFocused = false;
+    let searchComposing = false;
 
     function toast(message, type) {
       const node = document.createElement("div");
@@ -954,6 +964,8 @@
       card.className = "todo-card" + (todo.completed ? " is-completed" : "") + (todo.pinned ? " is-pinned" : "") + (selected ? " is-selected" : "");
       card.draggable = snapshot.settings.sort === "manual";
       card.dataset.id = todo.id;
+      card.tabIndex = 0;
+      card.setAttribute("role", "article");
 
       const top = document.createElement("div");
       top.className = "todo-card__top";
@@ -1384,6 +1396,7 @@
       if (els.calendarToolbar) els.calendarToolbar.hidden = !isCal || !cal;
       if (!isCal || !cal) {
         els.calendarBoard.innerHTML = "";
+      const calFrag = document.createDocumentFragment();
         return;
       }
       if (els.calendarRange) els.calendarRange.textContent = cal.label || "";
@@ -1444,7 +1457,7 @@
         }
         cell.appendChild(head);
         cell.appendChild(list);
-        els.calendarBoard.appendChild(cell);
+        calFrag.appendChild(cell);
       });
       if ((cal.undated || []).length) {
         const box = document.createElement("section");
@@ -1461,8 +1474,9 @@
           wrap.appendChild(chip);
         });
         box.appendChild(wrap);
-        els.calendarBoard.appendChild(box);
+        calFrag.appendChild(box);
       }
+      if (typeof calFrag !== "undefined") els.calendarBoard.appendChild(calFrag);
     }
 
     function renderBoard(snapshot) {
@@ -1472,11 +1486,14 @@
       if (els.board) {
         els.board.innerHTML = "";
         if (!isCal) {
+          const frag = document.createDocumentFragment();
+          const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
           list.forEach(function (todo, index) {
             const card = createCard(todo, snapshot);
-            card.style.animationDelay = Math.min(index * 0.03, 0.24) + "s";
-            els.board.appendChild(card);
+            if (!reduceMotion) card.style.animationDelay = Math.min(index * 0.02, 0.16) + "s";
+            frag.appendChild(card);
           });
+          els.board.appendChild(frag);
         }
       }
       renderCalendarBoard(snapshot);
@@ -1508,10 +1525,18 @@
     }
 
     function renderStats(snapshot) {
-      els.statCompletion.textContent = snapshot.stats.completion + "%";
-      els.statHigh.textContent = String(snapshot.stats.high);
-      els.statDueSoon.textContent = String(snapshot.stats.dueSoon);
-      if (els.statRepeating) els.statRepeating.textContent = String(snapshot.stats.repeating || 0);
+      const stats = snapshot.stats || {};
+      els.statCompletion.textContent = (stats.completion || 0) + "%";
+      els.statHigh.textContent = String(stats.high || 0);
+      els.statDueSoon.textContent = String(stats.dueSoon || 0);
+      if (els.statRepeating) els.statRepeating.textContent = String(stats.repeating || 0);
+      if (els.statDoneToday) els.statDoneToday.textContent = String(stats.doneToday || 0);
+      if (els.statActive) els.statActive.textContent = String(stats.active || 0);
+      if (els.progressFill) {
+        const pct = Math.max(0, Math.min(100, Number(stats.completion) || 0));
+        els.progressFill.style.width = pct + "%";
+        if (els.progressLabel) els.progressLabel.textContent = "今日完成 " + (stats.doneToday || 0) + " · 进行中 " + (stats.active || 0);
+      }
       if (els.btnEnableNotify) {
         els.btnEnableNotify.textContent = snapshot.settings.notificationsEnabled ? "提醒已开启" : "开启浏览器提醒";
       }
@@ -1535,20 +1560,75 @@
       }
     }
 
+    function uiSignature(snapshot) {
+      const s = snapshot.settings || {};
+      const st = snapshot.stats || {};
+      const cal = snapshot.calendar || {};
+      return [
+        s.view, s.sort, s.search, s.activeTag, s.activeListId, s.theme, s.density, s.calendarAnchor,
+        (snapshot.visibleTodos || []).map(function (t) {
+          return [t.id, t.updatedAt, t.completed, t.pinned, t.order, t.text, t.priority, t.dueDate, (t.tags || []).join(","), (t.subtasks || []).length].join(":");
+        }).join("|"),
+        (snapshot.selectedIds || []).join(","),
+        snapshot.canUndo ? 1 : 0,
+        st.completion, st.high, st.dueSoon, st.repeating, st.doneToday, st.active,
+        (snapshot.counts && snapshot.counts[s.view]) || 0,
+        (snapshot.lists || []).map(function (l) { return l.id + ":" + l.name + ":" + l.order; }).join("|"),
+        (snapshot.tags || []).map(function (t) { return t.name + ":" + t.count; }).join("|"),
+        (snapshot.focusTodos || []).map(function (t) { return t.id + ":" + t.updatedAt; }).join("|"),
+        cal.label || "",
+        (snapshot.upcomingReminders || []).map(function (t) { return t.id + ":" + t.dueDate + ":" + t.remindTime; }).join("|"),
+        (snapshot.templates || []).map(function (t) { return t.id + ":" + (t.updatedAt || t.name); }).join("|"),
+        (snapshot.recentSearches || []).join("|"),
+        (snapshot.backupPoints || []).map(function (b) { return b.id + ":" + b.createdAt; }).join("|"),
+        JSON.stringify(snapshot.syncStatus || {})
+      ].join("::");
+    }
+
+    function sidePanelOpen() {
+      return document.body.classList.contains("sidebar-open");
+    }
+
+    function scheduleRender(snapshot) {
+      pendingSnapshot = snapshot;
+      if (renderRaf) return;
+      const raf = window.requestAnimationFrame || function (cb) { return setTimeout(cb, 16); };
+      renderRaf = raf(function () {
+        renderRaf = 0;
+        const snap = pendingSnapshot;
+        pendingSnapshot = null;
+        if (snap) render(snap);
+      });
+    }
+
     function render(snapshot) {
       latestSnapshot = snapshot;
+      const sig = uiSignature(snapshot);
+      if (sig === lastUiSig) return;
+      lastUiSig = sig;
+
       setTheme(snapshot.settings.theme);
-      els.searchInput.value = snapshot.settings.search || "";
-      els.sortSelect.value = snapshot.settings.sort || "manual";
+      if (!searchFocused && !searchComposing) {
+        if (els.searchInput && els.searchInput.value !== (snapshot.settings.search || "")) {
+          els.searchInput.value = snapshot.settings.search || "";
+        }
+      }
+      if (els.sortSelect && els.sortSelect.value !== (snapshot.settings.sort || "manual")) {
+        els.sortSelect.value = snapshot.settings.sort || "manual";
+      }
+
       renderNav(snapshot);
       renderLists(snapshot);
       fillListSelects(snapshot);
       fillBulkSelects(snapshot);
-      renderBackupPanel(snapshot);
-      renderSyncPanel(snapshot);
-      renderTemplates(snapshot);
+      const wide = window.matchMedia && window.matchMedia("(min-width: 1100px)").matches;
+      if (wide || sidePanelOpen()) {
+        renderBackupPanel(snapshot);
+        renderSyncPanel(snapshot);
+        renderTemplates(snapshot);
+        renderReminderPanel(snapshot);
+      }
       renderRecentSearches(snapshot);
-      renderReminderPanel(snapshot);
       renderTags(snapshot);
       renderStats(snapshot);
       renderBulkBar(snapshot);
@@ -1580,14 +1660,40 @@
       });
 
       let searchTimer = null;
-      els.searchInput.addEventListener("input", function () {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(function () {
+      let searchPersistTimer = null;
+      if (els.searchInput) {
+        els.searchInput.addEventListener("focus", function () { searchFocused = true; });
+        els.searchInput.addEventListener("blur", function () {
+          searchFocused = false;
+          if (latestSnapshot) els.searchInput.value = latestSnapshot.settings.search || "";
+        });
+        els.searchInput.addEventListener("compositionstart", function () { searchComposing = true; });
+        els.searchInput.addEventListener("compositionend", function () {
+          searchComposing = false;
+          els.searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        els.searchInput.addEventListener("input", function () {
+          if (searchComposing) return;
+          clearTimeout(searchTimer);
+          clearTimeout(searchPersistTimer);
           const q = els.searchInput.value;
-          store.setSettings({ search: q });
-          if (String(q || "").trim()) store.pushRecentSearch(q);
-        }, 160);
-      });
+          searchTimer = setTimeout(function () {
+            store.setSettings({ search: q }, { skipPersist: true });
+          }, 120);
+          searchPersistTimer = setTimeout(function () {
+            store.setSettings({ search: q });
+            if (String(q || "").trim()) store.pushRecentSearch(q);
+          }, 450);
+        });
+        els.searchInput.addEventListener("keydown", function (event) {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            els.searchInput.value = "";
+            store.setSettings({ search: "" });
+            els.searchInput.blur();
+          }
+        });
+      }
 
       els.sortSelect.addEventListener("change", function () {
         store.setSettings({ sort: els.sortSelect.value });
@@ -2199,6 +2305,18 @@
         });
       });
 
+      if (els.btnScrollTop) {
+        const onScroll = function () {
+          const y = window.scrollY || document.documentElement.scrollTop || 0;
+          els.btnScrollTop.hidden = y < 420;
+        };
+        window.addEventListener("scroll", onScroll, { passive: true });
+        onScroll();
+        els.btnScrollTop.addEventListener("click", function () {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+
       document.addEventListener("keydown", function (event) {
         const tag = (event.target && event.target.tagName) || "";
         const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (event.target && event.target.isContentEditable);
@@ -2245,6 +2363,60 @@
           if (els.searchInput) els.searchInput.focus();
         } else if (event.key === "?") {
           openShortcuts();
+        } else if (event.key === "t" || event.key === "T") {
+          event.preventDefault();
+          store.setSettings({ view: "today", activeTag: "", search: "" });
+        } else if (event.key === "w" || event.key === "W") {
+          event.preventDefault();
+          store.setSettings({ view: "week" });
+        } else if (event.key === "m" || event.key === "M") {
+          event.preventDefault();
+          store.setSettings({ view: "month" });
+        } else if (event.key === "1") {
+          event.preventDefault(); store.setSettings({ view: "all" });
+        } else if (event.key === "2") {
+          event.preventDefault(); store.setSettings({ view: "active" });
+        } else if (event.key === "3") {
+          event.preventDefault(); store.setSettings({ view: "completed" });
+        } else if (event.key === "4") {
+          event.preventDefault(); store.setSettings({ view: "today" });
+        } else if (event.key === "5") {
+          event.preventDefault(); store.setSettings({ view: "week" });
+        } else if (event.key === "6") {
+          event.preventDefault(); store.setSettings({ view: "month" });
+        } else if (event.key === "c" || event.key === "C") {
+          const ids = (latestSnapshot && latestSnapshot.selectedIds) || [];
+          if (!ids.length) return;
+          event.preventDefault();
+          store.bulkComplete(ids, true).then(function (result) {
+            if (result && result.ok) toast("已完成 " + (result.count || ids.length) + " 项");
+          });
+        } else if (event.key === "p" || event.key === "P") {
+          const ids = (latestSnapshot && latestSnapshot.selectedIds) || [];
+          if (ids.length !== 1) return;
+          event.preventDefault();
+          store.togglePin(ids[0]).then(function () { toast("已切换置顶"); });
+        } else if (event.key === "j" || event.key === "J" || event.key === "k" || event.key === "K") {
+          event.preventDefault();
+          const cards = Array.prototype.slice.call(document.querySelectorAll(".todo-card"));
+          if (!cards.length) return;
+          const current = document.activeElement && document.activeElement.closest ? document.activeElement.closest(".todo-card") : null;
+          let idx = current ? cards.indexOf(current) : -1;
+          if (event.key === "j" || event.key === "J") idx = Math.min(cards.length - 1, idx + 1);
+          else idx = Math.max(0, idx <= 0 ? 0 : idx - 1);
+          const target = cards[idx];
+          if (target) {
+            if (!target.hasAttribute("tabindex")) target.tabIndex = 0;
+            target.focus({ preventScroll: false });
+            target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          }
+        } else if (event.key === "Enter") {
+          const card = document.activeElement && document.activeElement.closest ? document.activeElement.closest(".todo-card") : null;
+          if (!card) return;
+          event.preventDefault();
+          const id = card.dataset.id;
+          const todo = ((latestSnapshot && latestSnapshot.todos) || []).find(function (item) { return item.id === id; });
+          if (todo) openEditor(todo);
         }
       });
     }
@@ -2255,6 +2427,7 @@
     return {
       bindEvents: bindEvents,
       render: render,
+      scheduleRender: scheduleRender,
       toast: toast,
       openEditor: openEditor,
       setSyncController: setSyncController,

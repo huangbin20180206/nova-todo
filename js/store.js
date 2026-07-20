@@ -236,7 +236,28 @@
     const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],templates:[],ready:false,history:[],selectedIds:[],backupPoints:[],tombstones:[]};
     const listeners=new Set();
     let reminderTimer=null;
-    function emit(){ listeners.forEach(function(fn){ try{fn(getSnapshot());}catch(error){console.error(error);} }); }
+    let emitRaf = 0;
+    function flushEmit(){
+      emitRaf = 0;
+      const snapshot = getSnapshot();
+      listeners.forEach(function(fn){ try{fn(snapshot);}catch(error){console.error(error);} });
+    }
+    function emit(){
+      if (emitRaf) return;
+      const hasRaf = typeof global.requestAnimationFrame === "function";
+      const hasTimeout = typeof global.setTimeout === "function";
+      if (!hasRaf && !hasTimeout) { flushEmit(); return; }
+      const raf = hasRaf ? global.requestAnimationFrame : function(cb){ return global.setTimeout(cb, 16); };
+      emitRaf = raf(flushEmit);
+    }
+    function emitNow(){
+      if (emitRaf) {
+        const cancel = global.cancelAnimationFrame || global.clearTimeout;
+        cancel(emitRaf);
+        emitRaf = 0;
+      }
+      flushEmit();
+    }
     function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice(), subtasks: (todo.subtasks||[]).map(function(s){ return Object.assign({}, s); }) }); }); }
     function pushHistory(label){ state.history.push({ label: label || "变更", todos: cloneTodos(), selectedIds: state.selectedIds.slice(), at: Date.now() }); if (state.history.length > 30) state.history.shift(); }
     async function restoreTodos(todos){ state.todos = (todos || []).map(function(item, index){ return normalizeTodo(item, index, state.lists[0].id); }); await db.clearTodos(); if (state.todos.length) await db.putTodos(state.todos); }
@@ -352,7 +373,40 @@
     }
     async function persistTodo(todo){ await db.putTodo(todo); }
     function ensureTagsInLibrary(tags){ const incoming=normalizeTags(tags); if(!incoming.length) return false; const existing=new Set(state.tagLibrary.map(function(tag){return tag.toLowerCase();})); let changed=false; incoming.forEach(function(tag){ if(!existing.has(tag.toLowerCase())){ state.tagLibrary.push(tag); existing.add(tag.toLowerCase()); changed=true; } }); if(changed) state.tagLibrary=uniqueTags(state.tagLibrary).sort(function(a,b){return a.localeCompare(b,"zh-CN");}); return changed; }
-    function getStats(){ const activeListId=state.settings.activeListId||"all"; const live=state.todos.filter(function(todo){ return !todo.archived&&(activeListId==="all"||todo.listId===activeListId); }); const total=live.length; const completed=live.filter(function(todo){return todo.completed;}).length; const high=live.filter(function(todo){return !todo.completed&&(todo.priority==="high"||todo.priority==="urgent");}).length; const today=todayKey(); const dueSoon=live.filter(function(todo){ if(todo.completed||!todo.dueDate) return false; const diff=(new Date(todo.dueDate+"T00:00:00")-new Date(today+"T00:00:00"))/86400000; return diff>=0&&diff<=3; }).length; const repeating=live.filter(function(todo){return !todo.completed&&todo.repeat&&todo.repeat!=="none";}).length; return {completion:total?Math.round((completed/total)*100):0,high:high,dueSoon:dueSoon,repeating:repeating}; }
+    function getStats(){
+      const activeListId=state.settings.activeListId||"all";
+      const today=todayKey();
+      const todayStart=new Date(today+"T00:00:00").getTime();
+      let total=0, completed=0, high=0, dueSoon=0, repeating=0, doneToday=0, active=0;
+      for (let i=0;i<state.todos.length;i+=1){
+        const todo=state.todos[i];
+        if (todo.archived) continue;
+        if (activeListId!=="all" && todo.listId!==activeListId) continue;
+        total += 1;
+        if (todo.completed) {
+          completed += 1;
+          if (todo.updatedAt && todo.updatedAt >= todayStart) doneToday += 1;
+          continue;
+        }
+        active += 1;
+        if (todo.priority==="high" || todo.priority==="urgent") high += 1;
+        if (todo.repeat && todo.repeat!=="none") repeating += 1;
+        if (todo.dueDate) {
+          const diff=(new Date(todo.dueDate+"T00:00:00").getTime()-todayStart)/86400000;
+          if (diff>=0 && diff<=3) dueSoon += 1;
+        }
+      }
+      return {
+        completion: total ? Math.round((completed/total)*100) : 0,
+        high: high,
+        dueSoon: dueSoon,
+        repeating: repeating,
+        total: total,
+        active: active,
+        completed: completed,
+        doneToday: doneToday
+      };
+    }
     function getFocusTodos(){ const today=todayKey(); const activeListId=state.settings.activeListId||"all"; return state.todos.filter(function(todo){ if(todo.archived||todo.completed) return false; if(activeListId!=="all"&&todo.listId!==activeListId) return false; const isOverdue=!!todo.dueDate&&todo.dueDate<today; const isToday=todo.dueDate===today; const isHot=todo.priority==="urgent"||todo.priority==="high"; const isRemindToday=todo.remindEnabled&&todo.dueDate===today; return isOverdue||isToday||isHot||isRemindToday; }).sort(function(a,b){ const aOverdue=a.dueDate&&a.dueDate<today?0:1; const bOverdue=b.dueDate&&b.dueDate<today?0:1; if(aOverdue!==bOverdue) return aOverdue-bOverdue; const aToday=a.dueDate===today?0:1; const bToday=b.dueDate===today?0:1; if(aToday!==bToday) return aToday-bToday; const pr=(PRIORITY_RANK[b.priority]||0)-(PRIORITY_RANK[a.priority]||0); if(pr) return pr; if(a.dueDate&&b.dueDate) return a.dueDate.localeCompare(b.dueDate); if(a.dueDate) return -1; if(b.dueDate) return 1; return a.order-b.order; }).slice(0,5); }
     function matchesView(todo,view){
       const today=todayKey();
@@ -377,7 +431,35 @@
       return true;
     }
     function sortTodos(list,sort){ const cloned=list.slice(); function pinFirst(cmp){ return function(a,b){ const pin=(b.pinned?1:0)-(a.pinned?1:0); if(pin) return pin; return cmp(a,b); }; } if(sort==="created_desc") return cloned.sort(pinFirst(function(a,b){return b.createdAt-a.createdAt;})); if(sort==="due_asc") return cloned.sort(pinFirst(function(a,b){ if(!a.dueDate&&!b.dueDate) return a.order-b.order; if(!a.dueDate) return 1; if(!b.dueDate) return -1; return a.dueDate.localeCompare(b.dueDate)||a.order-b.order; })); if(sort==="priority_desc") return cloned.sort(pinFirst(function(a,b){ return (PRIORITY_RANK[b.priority]||0)-(PRIORITY_RANK[a.priority]||0)||a.order-b.order; })); if(sort==="alpha_asc") return cloned.sort(pinFirst(function(a,b){ return a.text.localeCompare(b.text,"zh-CN")||a.order-b.order; })); return cloned.sort(pinFirst(function(a,b){return a.order-b.order;})); }
-    function getVisibleTodos(){ const settings=state.settings; const keyword=(settings.search||"").trim().toLowerCase(); const activeListId=settings.activeListId||"all"; let list=state.todos.filter(function(todo){ if(activeListId!=="all"&&todo.listId!==activeListId) return false; if(!matchesView(todo,settings.view)) return false; if(settings.activeTag&&todo.tags.map(function(tag){return tag.toLowerCase();}).indexOf(settings.activeTag.toLowerCase())===-1) return false; if(!keyword) return true; const listName=(state.lists.find(function(item){return item.id===todo.listId;})||{}).name||""; const subText=(todo.subtasks||[]).map(function(s){return s.text||"";}).join(" "); const hay=[todo.text,todo.notes,listName,subText,todo.dueDate||""].concat(todo.tags).join(" ").toLowerCase(); return hay.indexOf(keyword)!==-1; }); return sortTodos(list,settings.sort); }
+    function getVisibleTodos(){
+      const settings=state.settings;
+      const keyword=(settings.search||"").trim().toLowerCase();
+      const activeListId=settings.activeListId||"all";
+      const activeTag=(settings.activeTag||"").toLowerCase();
+      const listNameById={};
+      for (let i=0;i<state.lists.length;i+=1){
+        const item=state.lists[i];
+        listNameById[item.id]=item.name||"";
+      }
+      const list=state.todos.filter(function(todo){
+        if(activeListId!=="all"&&todo.listId!==activeListId) return false;
+        if(!matchesView(todo,settings.view)) return false;
+        if(activeTag){
+          const tags=todo.tags||[];
+          let hit=false;
+          for(let t=0;t<tags.length;t+=1){ if(String(tags[t]).toLowerCase()===activeTag){ hit=true; break; } }
+          if(!hit) return false;
+        }
+        if(!keyword) return true;
+        const listName=listNameById[todo.listId]||"";
+        const subs=todo.subtasks||[];
+        let subText="";
+        for(let s=0;s<subs.length;s+=1){ subText += (subs[s].text||"") + " "; }
+        const hay=[todo.text||"", todo.notes||"", listName, subText, todo.dueDate||""].concat(todo.tags||[]).join(" ").toLowerCase();
+        return hay.indexOf(keyword)!==-1;
+      });
+      return sortTodos(list,settings.sort);
+    }
     function filterBoardTodos(list){
       const settings=state.settings;
       const keyword=(settings.search||"").trim().toLowerCase();
@@ -578,19 +660,38 @@
     async function deleteTodo(id){ pushHistory("删除任务"); state.todos=state.todos.filter(function(todo){return todo.id!==id;}); state.selectedIds=state.selectedIds.filter(function(x){return x!==id;}); await db.deleteTodo(id); await recordTombstones("todo", id); emit(); return {ok:true}; }
     async function archiveTodo(id,archived){ if(archived) return updateTodo(id,{archived:true,completed:true}); return updateTodo(id,{archived:false}); }
     async function clearCompleted(){ const activeListId=state.settings.activeListId||"all"; const victims=state.todos.filter(function(todo){ return todo.completed&&!todo.archived&&(activeListId==="all"||todo.listId===activeListId); }); if(!victims.length) return {ok:true,removed:0}; pushHistory("清理已完成"); for(const todo of victims) await db.deleteTodo(todo.id); const victimIds=new Set(victims.map(function(todo){return todo.id;})); state.todos=state.todos.filter(function(todo){return !victimIds.has(todo.id);}); state.selectedIds=state.selectedIds.filter(function(id){return !victimIds.has(id);}); await recordTombstones("todo", victims.map(function(todo){return todo.id;})); emit(); return {ok:true,removed:victims.length}; }
-    async function setSettings(patch){
-      state.settings=Object.assign({},state.settings,patch);
-      if(state.settings.activeListId!=="all"&&!listExists(state.settings.activeListId)) state.settings.activeListId="all";
+    async function setSettings(patch, options){
+      options = options || {};
+      const prev = state.settings;
+      const next = Object.assign({}, prev, patch || {});
+      if(next.activeListId!=="all"&&!listExists(next.activeListId)) next.activeListId="all";
       const allowedViews=["all","active","completed","today","week","month","overdue","scheduled","archived"];
-      if(allowedViews.indexOf(state.settings.view)===-1) state.settings.view="all";
-      if(typeof state.settings.calendarAnchor==="string" && /^\d{4}-\d{2}-\d{2}$/.test(state.settings.calendarAnchor)){
+      if(allowedViews.indexOf(next.view)===-1) next.view="all";
+      if(typeof next.calendarAnchor==="string" && /^\d{4}-\d{2}-\d{2}$/.test(next.calendarAnchor)){
         // keep
-      } else if(state.settings.view==="week" || state.settings.view==="month"){
-        state.settings.calendarAnchor=todayKey();
+      } else if(next.view==="week" || next.view==="month"){
+        next.calendarAnchor=todayKey();
       } else {
-        state.settings.calendarAnchor=state.settings.calendarAnchor || null;
+        next.calendarAnchor=next.calendarAnchor || null;
       }
-      await persistSettings(); emit(); return state.settings;
+      const keys = Object.keys(next);
+      let changed = keys.length !== Object.keys(prev).length;
+      if (!changed) {
+        for (let i=0;i<keys.length;i+=1){
+          const k = keys[i];
+          if (prev[k] !== next[k]) {
+            if (typeof prev[k] === "object" || typeof next[k] === "object") {
+              try { if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) { changed = true; break; } }
+              catch (e) { changed = true; break; }
+            } else { changed = true; break; }
+          }
+        }
+      }
+      if (!changed) return prev;
+      state.settings = next;
+      if (!options.skipPersist) await persistSettings();
+      emit();
+      return state.settings;
     }
     async function shiftCalendar(delta){
       delta = Number(delta)||0;

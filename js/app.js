@@ -28,7 +28,8 @@
     ui.bindEvents();
     if (sync && ui.setSyncController) ui.setSyncController(sync);
     store.subscribe(function (snapshot) {
-      ui.render(snapshot);
+      if (ui.scheduleRender) ui.scheduleRender(snapshot);
+      else ui.render(snapshot);
     });
 
     try {

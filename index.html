@@ -77,10 +77,32 @@
 
       <section class="side-card side-card--stats">
         <h2>状态雷达</h2>
+        <div class="daily-progress" aria-label="今日进度">
+          <div class="daily-progress__meta">
+            <span id="daily-progress-label">今日完成 0 · 进行中 0</span>
+            <strong id="stat-completion-top">0%</strong>
+          </div>
+          <div class="daily-progress__track">
+            <div id="daily-progress-fill" class="daily-progress__fill" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="daily-progress" aria-label="今日进度">
+          <div class="daily-progress__meta">
+            <span id="daily-progress-label">今日完成 0 · 进行中 0</span>
+            <strong id="stat-completion">0%</strong>
+          </div>
+          <div class="daily-progress__track">
+            <div id="daily-progress-fill" class="daily-progress__fill" style="width:0%"></div>
+          </div>
+        </div>
         <div class="stat-grid">
           <div class="stat-pill">
-            <strong id="stat-completion">0%</strong>
-            <span>完成率</span>
+            <strong id="stat-done-today">0</strong>
+            <span>今日完成</span>
+          </div>
+          <div class="stat-pill">
+            <strong id="stat-active">0</strong>
+            <span>进行中</span>
           </div>
           <div class="stat-pill">
             <strong id="stat-high">0</strong>
@@ -430,6 +452,13 @@
     <ul class="shortcuts-list">
       <li><kbd>N</kbd><span>新建任务</span></li>
       <li><kbd>/</kbd><span>聚焦搜索</span></li>
+      <li><kbd>T</kbd><span>今日视图</span></li>
+      <li><kbd>W</kbd> / <kbd>M</kbd><span>周 / 月视图</span></li>
+      <li><kbd>1</kbd>-<kbd>6</kbd><span>切换常用视图</span></li>
+      <li><kbd>J</kbd> / <kbd>K</kbd><span>上下移动任务焦点</span></li>
+      <li><kbd>Enter</kbd><span>打开当前焦点任务</span></li>
+      <li><kbd>C</kbd><span>完成已选任务</span></li>
+      <li><kbd>P</kbd><span>置顶/取消置顶（单选）</span></li>
       <li><kbd>Ctrl</kbd> + <kbd>Z</kbd><span>撤销</span></li>
       <li><kbd>Ctrl</kbd> + <kbd>A</kbd><span>全选当前列表</span></li>
       <li><kbd>Delete</kbd><span>删除已选任务</span></li>
@@ -451,6 +480,7 @@
 
   <div id="offline-pill" class="offline-pill" hidden>离线模式</div>
 
+  <button id="btn-scroll-top" class="scroll-top-btn" type="button" hidden title="回到顶部" aria-label="回到顶部">↑</button>
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
   <script src="./js/db.js"></script>
