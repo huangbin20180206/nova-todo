@@ -161,6 +161,11 @@
       btnSyncPush: $("#btn-sync-push"),
       btnSyncPull: $("#btn-sync-pull"),
       btnSyncSave: $("#btn-sync-save"),
+      syncConflicts: $("#sync-conflicts"),
+      syncConflictList: $("#sync-conflict-list"),
+      tombstoneMeta: $("#tombstone-meta"),
+      btnTombstonePrune: $("#btn-tombstone-prune"),
+      btnTombstoneClear: $("#btn-tombstone-clear"),
       btnClearCompleted: $("#btn-clear-completed"),
       btnExport: $("#btn-export"),
       btnImport: $("#btn-import"),
@@ -524,7 +529,11 @@
       const provider = sync.provider || "gist";
       if (els.syncEnabled) els.syncEnabled.value = sync.enabled ? "on" : "off";
       if (els.syncProvider) els.syncProvider.value = provider;
-      if (els.syncAuto) els.syncAuto.value = sync.autoSync ? "on" : "off";
+      if (els.syncAuto) {
+        const interval = Number(sync.autoSyncInterval || 0);
+        if (interval === 1 || interval === 5 || interval === 15) els.syncAuto.value = String(interval);
+        else els.syncAuto.value = sync.autoSync ? "15" : "off";
+      }
       // do not overwrite token/remote while typing if focused
       const active = document.activeElement;
       if (els.syncToken && active !== els.syncToken) els.syncToken.value = sync.hasToken ? "********" : "";
@@ -540,16 +549,49 @@
         if (provider === "http" && sync.endpoint) bits.push("已配置 Endpoint");
         bits.push("上次同步：" + formatSyncTime(sync.lastSyncedAt));
         if (sync.lastResult) bits.push(sync.lastResult);
+        const tombCount = Array.isArray(snapshot && snapshot.tombstones) ? snapshot.tombstones.length : (sync.tombstoneCount || 0);
+        if (tombCount) bits.push("删除标记 " + tombCount);
+        const conflictCount = Array.isArray(sync.lastConflicts) ? sync.lastConflicts.length : 0;
+        if (conflictCount) bits.push("冲突 " + conflictCount);
         els.syncMeta.textContent = bits.join(" · ");
+      }
+      // conflicts list
+      if (els.syncConflicts && els.syncConflictList) {
+        const conflicts = Array.isArray(sync.lastConflicts) ? sync.lastConflicts : [];
+        if (!conflicts.length) {
+          els.syncConflicts.hidden = true;
+          els.syncConflictList.innerHTML = "";
+        } else {
+          els.syncConflicts.hidden = false;
+          els.syncConflictList.innerHTML = conflicts.slice(0, 12).map(function (item) {
+            const entityLabel = item.entity === "list" ? "清单" : (item.entity === "template" ? "模板" : "任务");
+            const winner = item.winner === "remote" ? "远端" : "本机";
+            const label = item.winner === "remote" ? (item.remoteLabel || item.localLabel || item.id) : (item.localLabel || item.remoteLabel || item.id);
+            return '<div class="sync-conflict-item"><strong>' + entityLabel + '</strong> · 保留' + winner + '版<br/>' +
+              escapeHtml(label || item.id) +
+              '<br/><span class="muted">本机 ' + formatSyncTime(item.localUpdatedAt) + ' / 远端 ' + formatSyncTime(item.remoteUpdatedAt) + '</span></div>';
+          }).join("");
+        }
+      }
+      if (els.tombstoneMeta) {
+        const tombs = Array.isArray(snapshot && snapshot.tombstones) ? snapshot.tombstones : [];
+        if (!tombs.length) els.tombstoneMeta.textContent = "暂无删除标记";
+        else {
+          const latest = tombs.slice().sort(function(a,b){return (b.deletedAt||0)-(a.deletedAt||0);})[0];
+          els.tombstoneMeta.textContent = tombs.length + " 条删除标记 · 最近 " + formatSyncTime(latest && latest.deletedAt);
+        }
       }
     }
     function readSyncForm() {
       const provider = els.syncProvider ? els.syncProvider.value : "gist";
       const tokenRaw = els.syncToken ? els.syncToken.value : "";
+      const autoRaw = els.syncAuto ? els.syncAuto.value : "off";
+      const interval = autoRaw === "1" || autoRaw === "5" || autoRaw === "15" ? Number(autoRaw) : 0;
       const patch = {
         enabled: !!(els.syncEnabled && els.syncEnabled.value === "on"),
         provider: provider,
-        autoSync: !!(els.syncAuto && els.syncAuto.value === "on"),
+        autoSync: interval > 0,
+        autoSyncInterval: interval,
         remoteId: els.syncRemoteId ? els.syncRemoteId.value.trim() : "",
         endpoint: els.syncEndpoint ? els.syncEndpoint.value.trim() : ""
       };
@@ -1508,7 +1550,10 @@
             if (!result.ok) toast(result.error || "同步失败", "error");
             else if (mode === "pull") toast("拉取完成" + (result.count != null ? (" · " + result.count + " 条") : ""));
             else if (mode === "push") toast("推送完成" + (result.remoteId ? (" · Gist " + result.remoteId) : ""));
-            else toast("同步完成" + (result.merged ? "（已合并）" : "（已上传）") + (result.remoteId ? (" · " + result.remoteId) : ""));
+            else {
+              const conflictText = (result.conflicts && result.conflicts.length) ? (" · 冲突 " + result.conflicts.length) : "";
+              toast("同步完成" + (result.merged ? "（已合并）" : "（已上传）") + conflictText + (result.remoteId ? (" · " + result.remoteId) : ""));
+            }
           } catch (error) {
             console.error(error);
             toast((error && error.message) || "同步失败", "error");
@@ -1517,8 +1562,56 @@
         if (els.btnSyncNow) els.btnSyncNow.addEventListener("click", function () { runSync("sync"); });
         if (els.btnSyncPush) els.btnSyncPush.addEventListener("click", function () { runSync("push"); });
         if (els.btnSyncPull) els.btnSyncPull.addEventListener("click", function () { runSync("pull"); });
+        if (els.btnTombstonePrune) {
+          els.btnTombstonePrune.addEventListener("click", async function () {
+            const result = await store.clearTombstones({ onlyExpired: true });
+            toast(result.ok ? ("已清理过期删除标记 · 剩余 " + result.remaining) : "清理失败");
+          });
+        }
+        if (els.btnTombstoneClear) {
+          els.btnTombstoneClear.addEventListener("click", async function () {
+            if (!window.confirm("清空全部删除标记后，旧删除可能在其他设备同步时复活。确定继续？")) return;
+            const result = await store.clearTombstones({});
+            toast(result.ok ? "删除标记已清空" : "清空失败");
+          });
+        }
       }
       bindSyncEvents();
+
+      // more-realtime triggers: resume / online / local data changes
+      function requestAutoSync(reason, delay) {
+        if (!syncController || typeof syncController.scheduleSync !== "function") return;
+        syncController.scheduleSync(reason || "auto", delay);
+      }
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible" && syncController && typeof syncController.onAppResume === "function") {
+          syncController.onAppResume();
+        }
+      });
+      window.addEventListener("focus", function () {
+        if (syncController && typeof syncController.onAppResume === "function") syncController.onAppResume();
+      });
+      window.addEventListener("online", function () {
+        requestAutoSync("online", 1000);
+      });
+      // debounce sync after local mutations (skip pure UI filter changes)
+      let lastTodoSig = "";
+      store.subscribe(function (snap) {
+        try {
+          const sig = [
+            (snap.todos || []).length,
+            (snap.lists || []).length,
+            (snap.templates || []).length,
+            (snap.tombstones || []).length,
+            (snap.todos || []).reduce(function (max, t) { return Math.max(max, t.updatedAt || 0); }, 0)
+          ].join("|");
+          if (!lastTodoSig) { lastTodoSig = sig; return; }
+          if (sig !== lastTodoSig) {
+            lastTodoSig = sig;
+            requestAutoSync("local-change", 2500);
+          }
+        } catch (error) {}
+      });
 
       if (els.btnReminderRefresh) {
         els.btnReminderRefresh.addEventListener("click", function () {

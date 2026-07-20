@@ -57,23 +57,15 @@
 
       const schemaLabel = document.querySelector("#schema-version");
       if (schemaLabel) {
-        schemaLabel.textContent = "schema v" + ((snapshot && snapshot.schemaVersion) || (window.NovaSchema && window.NovaSchema.SCHEMA_VERSION) || 3);
+        schemaLabel.textContent = "schema v" + ((snapshot && snapshot.schemaVersion) || (window.NovaSchema && window.NovaSchema.SCHEMA_VERSION) || 4);
       }
 
       const input = document.querySelector("#quick-input");
       if (input) input.focus();
 
-      // optional auto sync every 15 min when enabled
-      if (sync) {
-        setInterval(function () {
-          const cfg = sync.getConfig();
-          if (!cfg.enabled || !cfg.autoSync) return;
-          if (!cfg.token && cfg.provider === "gist") return;
-          if (cfg.provider === "http" && !cfg.endpoint) return;
-          sync.syncNow("sync").catch(function (error) {
-            console.warn("auto sync failed", error);
-          });
-        }, 15 * 60 * 1000);
+      // auto-sync loop is owned by NovaSync (interval + resume + local-change debounce)
+      if (sync && typeof sync.startAutoSync === "function") {
+        sync.startAutoSync();
       }
     } catch (error) {
       console.error(error);

@@ -193,17 +193,17 @@
     return { ok:true, error:"", payload:payload, tokens:tokens };
   }
   function normalizeTodo(raw,index,fallbackListId){ const now=Date.now(); const text=String((raw&&raw.text)||"").trim(); return {id:raw&&typeof raw.id==="string"&&raw.id?raw.id:createId(),text:text,notes:String((raw&&raw.notes)||"").trim(),subtasks:normalizeSubtasks(raw&&raw.subtasks),completed:!!(raw&&raw.completed),archived:!!(raw&&raw.archived),pinned:!!(raw&&raw.pinned),priority:normalizePriority(raw&&raw.priority),dueDate:raw&&typeof raw.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dueDate)?raw.dueDate:null,tags:normalizeTags(raw&&raw.tags),listId:raw&&typeof raw.listId==="string"&&raw.listId?raw.listId:(fallbackListId||"list-inbox"),repeat:normalizeRepeat(raw&&raw.repeat),remindEnabled:!!(raw&&raw.remindEnabled),remindTime:normalizeRemindTime(raw&&raw.remindTime),lastNotifiedKey:raw&&typeof raw.lastNotifiedKey==="string"?raw.lastNotifiedKey:null,completedAt:typeof (raw&&raw.completedAt)==="number"?raw.completedAt:null,order:typeof (raw&&raw.order)==="number"?raw.order:index||now,createdAt:typeof (raw&&raw.createdAt)==="number"?raw.createdAt:now,updatedAt:typeof (raw&&raw.updatedAt)==="number"?raw.updatedAt:now}; }
-  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null,recentSearches:[],sync:{enabled:false,provider:"gist",token:"",remoteId:"",endpoint:"",autoSync:false,lastSyncedAt:null,lastRemoteUpdatedAt:null,deviceId:null,lastResult:"",method:"PUT"}}; }
+  function defaultSettings(){ return {theme:"dark",view:"all",sort:"manual",search:"",activeTag:"",activeListId:"all",notificationsEnabled:false,density:"comfortable",autoBackup:true,lastBackupAt:null,recentSearches:[],sync:{enabled:false,provider:"gist",token:"",remoteId:"",endpoint:"",autoSync:false,autoSyncInterval:0,lastSyncedAt:null,lastRemoteUpdatedAt:null,deviceId:null,lastResult:"",lastConflicts:[],method:"PUT"}}; }
 
   function createStore(db){
-    const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],templates:[],ready:false,history:[],selectedIds:[],backupPoints:[]};
+    const state={todos:[],lists:defaultLists(),settings:defaultSettings(),tagLibrary:[],templates:[],ready:false,history:[],selectedIds:[],backupPoints:[],tombstones:[]};
     const listeners=new Set();
     let reminderTimer=null;
     function emit(){ listeners.forEach(function(fn){ try{fn(getSnapshot());}catch(error){console.error(error);} }); }
     function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice(), subtasks: (todo.subtasks||[]).map(function(s){ return Object.assign({}, s); }) }); }); }
     function pushHistory(label){ state.history.push({ label: label || "变更", todos: cloneTodos(), selectedIds: state.selectedIds.slice(), at: Date.now() }); if (state.history.length > 30) state.history.shift(); }
     async function restoreTodos(todos){ state.todos = (todos || []).map(function(item, index){ return normalizeTodo(item, index, state.lists[0].id); }); await db.clearTodos(); if (state.todos.length) await db.putTodos(state.todos); }
-    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,schemaVersion:(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||3,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8),syncStatus:(function(){ const s=Object.assign({}, defaultSettings().sync, (state.settings&&state.settings.sync)||{}); return {enabled:!!s.enabled,provider:s.provider||"gist",remoteId:s.remoteId||"",endpoint:s.endpoint||"",autoSync:!!s.autoSync,lastSyncedAt:s.lastSyncedAt||null,lastRemoteUpdatedAt:s.lastRemoteUpdatedAt||null,lastResult:s.lastResult||"",hasToken:!!s.token,deviceId:s.deviceId||null}; })()}; }
+    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,schemaVersion:(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||4,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),tombstones:(state.tombstones||[]).slice(),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8),syncStatus:(function(){ const s=Object.assign({}, defaultSettings().sync, (state.settings&&state.settings.sync)||{}); return {enabled:!!s.enabled,provider:s.provider||"gist",remoteId:s.remoteId||"",endpoint:s.endpoint||"",autoSync:!!s.autoSync,autoSyncInterval:Number(s.autoSyncInterval||0)||0,lastSyncedAt:s.lastSyncedAt||null,lastRemoteUpdatedAt:s.lastRemoteUpdatedAt||null,lastResult:s.lastResult||"",lastConflicts:Array.isArray(s.lastConflicts)?s.lastConflicts.slice(0,20):[],hasToken:!!s.token,deviceId:s.deviceId||null,tombstoneCount:(state.tombstones||[]).length}; })()}; }
     function subscribe(fn){ listeners.add(fn); return function(){ listeners.delete(fn); }; }
     function listExists(id){ return state.lists.some(function(list){return list.id===id;}); }
     function ensureListId(listId){ if(listId&&listExists(listId)) return listId; return state.lists[0]?state.lists[0].id:"list-inbox"; }
@@ -215,6 +215,59 @@
     async function persistTagLibrary(){ await db.setMeta("tagLibrary", state.tagLibrary); }
     async function persistLists(){ await db.setMeta("lists", state.lists); }
     async function persistSettings(){ await db.setMeta("settings", state.settings); }
+    async function persistTombstones(){
+      const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      const map = new Map();
+      (state.tombstones || []).forEach(function(item){
+        if(!item || !item.id) return;
+        const next = {
+          id: String(item.id),
+          entity: String(item.entity || "todo"),
+          deletedAt: typeof item.deletedAt === "number" ? item.deletedAt : Date.now(),
+          deviceId: item.deviceId || null
+        };
+        if(next.deletedAt < cutoff) return;
+        const key = next.entity + "::" + next.id;
+        const prev = map.get(key);
+        if(!prev || next.deletedAt >= prev.deletedAt) map.set(key, next);
+      });
+      state.tombstones = Array.from(map.values()).sort(function(a,b){ return (b.deletedAt||0) - (a.deletedAt||0); }).slice(0, 500);
+      await db.setMeta("tombstones", state.tombstones);
+      return state.tombstones;
+    }
+    function rememberTombstone(entity, id, deletedAt){
+      if(!id) return;
+      const deviceId = (state.settings && state.settings.sync && state.settings.sync.deviceId) || null;
+      const next = {
+        id: String(id),
+        entity: String(entity || "todo"),
+        deletedAt: typeof deletedAt === "number" ? deletedAt : Date.now(),
+        deviceId: deviceId
+      };
+      const key = next.entity + "::" + next.id;
+      let replaced = false;
+      state.tombstones = (state.tombstones || []).map(function(item){
+        if((item.entity || "todo") + "::" + item.id !== key) return item;
+        replaced = true;
+        if((item.deletedAt || 0) > next.deletedAt) return item;
+        return next;
+      });
+      if(!replaced) state.tombstones = [next].concat(state.tombstones || []);
+    }
+    async function recordTombstones(entity, ids){
+      const list = Array.isArray(ids) ? ids : [ids];
+      const now = Date.now();
+      list.forEach(function(id){ rememberTombstone(entity, id, now); });
+      await persistTombstones();
+    }
+    function stripSecretsFromSettings(settings){
+      const s = Object.assign({}, settings || {});
+      if(s.sync){
+        s.sync = Object.assign({}, s.sync);
+        delete s.sync.token;
+      }
+      return s;
+    }
     async function persistTodo(todo){ await db.putTodo(todo); }
     function ensureTagsInLibrary(tags){ const incoming=normalizeTags(tags); if(!incoming.length) return false; const existing=new Set(state.tagLibrary.map(function(tag){return tag.toLowerCase();})); let changed=false; incoming.forEach(function(tag){ if(!existing.has(tag.toLowerCase())){ state.tagLibrary.push(tag); existing.add(tag.toLowerCase()); changed=true; } }); if(changed) state.tagLibrary=uniqueTags(state.tagLibrary).sort(function(a,b){return a.localeCompare(b,"zh-CN");}); return changed; }
     function getStats(){ const activeListId=state.settings.activeListId||"all"; const live=state.todos.filter(function(todo){ return !todo.archived&&(activeListId==="all"||todo.listId===activeListId); }); const total=live.length; const completed=live.filter(function(todo){return todo.completed;}).length; const high=live.filter(function(todo){return !todo.completed&&(todo.priority==="high"||todo.priority==="urgent");}).length; const today=todayKey(); const dueSoon=live.filter(function(todo){ if(todo.completed||!todo.dueDate) return false; const diff=(new Date(todo.dueDate+"T00:00:00")-new Date(today+"T00:00:00"))/86400000; return diff>=0&&diff<=3; }).length; const repeating=live.filter(function(todo){return !todo.completed&&todo.repeat&&todo.repeat!=="none";}).length; return {completion:total?Math.round((completed/total)*100):0,high:high,dueSoon:dueSoon,repeating:repeating}; }
@@ -240,13 +293,14 @@
     function stopReminderLoop(){ if(reminderTimer){ global.clearInterval(reminderTimer); reminderTimer=null; } }
 
     async function init(){
-      const [todos,settings,lists,tagLibrary,backupPoints,templates,schemaVersion]=await Promise.all([
+      const [todos,settings,lists,tagLibrary,backupPoints,templates,tombstones,schemaVersion]=await Promise.all([
         db.getAllTodos(),
         db.getMeta("settings",defaultSettings()),
         db.getMeta("lists",null),
         db.getMeta("tagLibrary",null),
         db.getMeta("backupPoints",[]),
         db.getMeta("templates",[]),
+        db.getMeta("tombstones",[]),
         db.getMeta("schemaVersion",0)
       ]);
 
@@ -271,6 +325,7 @@
             tagLibrary: tagLibrary,
             templates: templates,
             backupPoints: backupPoints,
+            tombstones: tombstones,
             helpers: {
               normalizeTodo: normalizeTodo,
               normalizeList: normalizeList,
@@ -289,6 +344,7 @@
         state.tagLibrary = migrated.tagLibrary || [];
         state.templates = migrated.templates || [];
         state.backupPoints = migrated.backupPoints || [];
+        state.tombstones = migrated.tombstones || [];
         if(migrated.migrated){
           await persistLists();
           await db.putTodos(state.todos);
@@ -296,10 +352,11 @@
           await persistTagLibrary();
           await db.setMeta("templates", state.templates);
           await db.setMeta("backupPoints", state.backupPoints);
-          await db.setMeta("schemaVersion", migrated.version || (global.NovaSchema && global.NovaSchema.SCHEMA_VERSION) || 3);
+          await persistTombstones();
+          await db.setMeta("schemaVersion", migrated.version || (global.NovaSchema && global.NovaSchema.SCHEMA_VERSION) || 4);
           if(migrated.log && migrated.log.length){ console.info("Nova schema migration:", migrated.log.join(", ")); }
         } else {
-          await db.setMeta("schemaVersion", migrated.version || 3);
+          await db.setMeta("schemaVersion", migrated.version || 4);
         }
       } else {
         // fallback old path
@@ -310,7 +367,8 @@
         state.tagLibrary=Array.isArray(tagLibrary)?uniqueTags(tagLibrary):[];
         state.templates=Array.isArray(templates)?templates.map(function(item,index){return normalizeTemplate(item,index);}).filter(Boolean):[];
         state.backupPoints=Array.isArray(backupPoints)?backupPoints:[];
-        await db.setMeta("schemaVersion", (global.NovaSchema && global.NovaSchema.SCHEMA_VERSION) || 3);
+        state.tombstones=Array.isArray(tombstones)?tombstones:[];
+        await db.setMeta("schemaVersion", (global.NovaSchema && global.NovaSchema.SCHEMA_VERSION) || 4);
       }
 
       if(!Array.isArray(state.settings.recentSearches)) state.settings.recentSearches=[];
@@ -345,15 +403,15 @@
       }
       return updateTodo(id,{completed:!target.completed});
     }
-    async function deleteTodo(id){ pushHistory("删除任务"); state.todos=state.todos.filter(function(todo){return todo.id!==id;}); state.selectedIds=state.selectedIds.filter(function(x){return x!==id;}); await db.deleteTodo(id); emit(); return {ok:true}; }
+    async function deleteTodo(id){ pushHistory("删除任务"); state.todos=state.todos.filter(function(todo){return todo.id!==id;}); state.selectedIds=state.selectedIds.filter(function(x){return x!==id;}); await db.deleteTodo(id); await recordTombstones("todo", id); emit(); return {ok:true}; }
     async function archiveTodo(id,archived){ if(archived) return updateTodo(id,{archived:true,completed:true}); return updateTodo(id,{archived:false}); }
-    async function clearCompleted(){ const activeListId=state.settings.activeListId||"all"; const victims=state.todos.filter(function(todo){ return todo.completed&&!todo.archived&&(activeListId==="all"||todo.listId===activeListId); }); if(!victims.length) return {ok:true,removed:0}; pushHistory("清理已完成"); for(const todo of victims) await db.deleteTodo(todo.id); const victimIds=new Set(victims.map(function(todo){return todo.id;})); state.todos=state.todos.filter(function(todo){return !victimIds.has(todo.id);}); state.selectedIds=state.selectedIds.filter(function(id){return !victimIds.has(id);}); emit(); return {ok:true,removed:victims.length}; }
+    async function clearCompleted(){ const activeListId=state.settings.activeListId||"all"; const victims=state.todos.filter(function(todo){ return todo.completed&&!todo.archived&&(activeListId==="all"||todo.listId===activeListId); }); if(!victims.length) return {ok:true,removed:0}; pushHistory("清理已完成"); for(const todo of victims) await db.deleteTodo(todo.id); const victimIds=new Set(victims.map(function(todo){return todo.id;})); state.todos=state.todos.filter(function(todo){return !victimIds.has(todo.id);}); state.selectedIds=state.selectedIds.filter(function(id){return !victimIds.has(id);}); await recordTombstones("todo", victims.map(function(todo){return todo.id;})); emit(); return {ok:true,removed:victims.length}; }
     async function setSettings(patch){ state.settings=Object.assign({},state.settings,patch); if(state.settings.activeListId!=="all"&&!listExists(state.settings.activeListId)) state.settings.activeListId="all"; await persistSettings(); emit(); return state.settings; }
     async function createList(input){ const name=String((input&&input.name)||"").trim(); if(!name) return {ok:false,error:"请输入清单名称。"}; if(state.lists.some(function(list){return list.name.toLowerCase()===name.toLowerCase();})) return {ok:false,error:"清单已存在。"}; const maxOrder=state.lists.reduce(function(max,list){return Math.max(max,list.order);},0); const list=normalizeList({name:name,icon:(input&&input.icon)||"📁",order:maxOrder+1000},state.lists.length); state.lists.push(list); await persistLists(); emit(); return {ok:true,list:list}; }
     async function renameList(id,name,icon){ const index=state.lists.findIndex(function(list){return list.id===id;}); if(index===-1) return {ok:false,error:"清单不存在。"}; const nextName=String(name||"").trim(); if(!nextName) return {ok:false,error:"清单名称不能为空。"}; state.lists[index]=normalizeList(Object.assign({},state.lists[index],{name:nextName,icon:icon||state.lists[index].icon}),index); await persistLists(); emit(); return {ok:true,list:state.lists[index]}; }
-    async function deleteList(id){ if(state.lists.length<=1) return {ok:false,error:"至少保留一个清单。"}; const target=state.lists.find(function(list){return list.id===id;}); if(!target) return {ok:false,error:"清单不存在。"}; const fallback=state.lists.find(function(list){return list.id!==id;}); state.lists=state.lists.filter(function(list){return list.id!==id;}); let changed=false; state.todos=state.todos.map(function(todo){ if(todo.listId!==id) return todo; changed=true; return Object.assign({},todo,{listId:fallback.id,updatedAt:Date.now()}); }); if(state.settings.activeListId===id){ state.settings.activeListId="all"; await persistSettings(); } await persistLists(); if(changed) await db.putTodos(state.todos); emit(); return {ok:true,movedTo:fallback.id}; }
+    async function deleteList(id){ if(state.lists.length<=1) return {ok:false,error:"至少保留一个清单。"}; const target=state.lists.find(function(list){return list.id===id;}); if(!target) return {ok:false,error:"清单不存在。"}; const fallback=state.lists.find(function(list){return list.id!==id;}); state.lists=state.lists.filter(function(list){return list.id!==id;}); let changed=false; state.todos=state.todos.map(function(todo){ if(todo.listId!==id) return todo; changed=true; return Object.assign({},todo,{listId:fallback.id,updatedAt:Date.now()}); }); if(state.settings.activeListId===id){ state.settings.activeListId="all"; await persistSettings(); } await persistLists(); if(changed) await db.putTodos(state.todos); await recordTombstones("list", id); emit(); return {ok:true,movedTo:fallback.id}; }
     async function reorderVisible(fromId,toId){ if(state.settings.sort!=="manual") return {ok:false,error:"当前不是手动排序模式。"}; const visible=getVisibleTodos(); const fromIndex=visible.findIndex(function(todo){return todo.id===fromId;}); const toIndex=visible.findIndex(function(todo){return todo.id===toId;}); if(fromIndex<0||toIndex<0||fromIndex===toIndex) return {ok:false}; const moving=visible[fromIndex]; const reordered=visible.slice(); reordered.splice(fromIndex,1); reordered.splice(toIndex,0,moving); const orderedIds=reordered.map(function(todo){return todo.id;}); const orderMap=new Map(); orderedIds.forEach(function(id,index){orderMap.set(id,(index+1)*1000);}); const rest=state.todos.filter(function(todo){return !orderMap.has(todo.id);}).sort(function(a,b){return a.order-b.order;}); rest.forEach(function(todo,index){orderMap.set(todo.id,(orderedIds.length+index+1)*1000);}); const now=Date.now(); state.todos=state.todos.map(function(todo){ return Object.assign({},todo,{order:orderMap.get(todo.id),updatedAt:now}); }); await db.putTodos(state.todos); emit(); return {ok:true}; }
-    async function exportData(){ const data=await db.exportAll(); data.version=2; data.schemaVersion=(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||3; data.tagLibrary=state.tagLibrary.slice(); data.lists=state.lists.slice(); data.templates=(state.templates||[]).slice(); data.backupPoints=(state.backupPoints||[]).slice(0,8); return data; }
+    async function exportData(){ const data=await db.exportAll(); data.version=2; data.schemaVersion=(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||4; data.tagLibrary=state.tagLibrary.slice(); data.lists=state.lists.slice(); data.templates=(state.templates||[]).slice(); data.backupPoints=(state.backupPoints||[]).slice(0,8); data.tombstones=(state.tombstones||[]).slice(); if(data.settings) data.settings=stripSecretsFromSettings(data.settings); return data; }
     async function importData(payload,mode){ const todos=Array.isArray(payload&&payload.todos)?payload.todos.map(function(item,index){return normalizeTodo(item,index,"list-inbox");}).filter(function(item){return !!item.text;}):[]; if(Array.isArray(payload&&payload.lists)&&payload.lists.length){ state.lists=payload.lists.map(function(item,index){return normalizeList(item,index);}); } else if(mode==="replace"){ state.lists=defaultLists(); } await persistLists(); await db.importAll({todos:todos,settings:payload&&payload.settings?Object.assign(defaultSettings(),payload.settings):state.settings},mode||"merge"); state.todos=await db.getAllTodos().then(function(rows){ return (rows||[]).map(function(item,index){return normalizeTodo(item,index,state.lists[0].id);}); }); state.settings=Object.assign(defaultSettings(),await db.getMeta("settings",state.settings)); if(Array.isArray(payload&&payload.tagLibrary)){ state.tagLibrary=uniqueTags(payload.tagLibrary); } else { const used=[]; state.todos.forEach(function(todo){ (todo.tags||[]).forEach(function(tag){used.push(tag);}); }); state.tagLibrary=uniqueTags(state.tagLibrary.concat(used)); } await persistTagLibrary(); emit(); return {ok:true,count:todos.length}; }
     async function createTag(name){ const tags=normalizeTags(name); if(!tags.length) return {ok:false,error:"请输入标签名。"}; const tag=tags[0]; if(state.tagLibrary.some(function(item){return item.toLowerCase()===tag.toLowerCase();})) return {ok:false,error:"标签已存在。",tag:tag}; state.tagLibrary.push(tag); state.tagLibrary=uniqueTags(state.tagLibrary).sort(function(a,b){return a.localeCompare(b,"zh-CN");}); await persistTagLibrary(); emit(); return {ok:true,tag:tag}; }
     async function deleteTag(name){ const target=String(name||"").trim(); if(!target) return {ok:false,error:"标签不存在。"}; const before=state.tagLibrary.length; state.tagLibrary=state.tagLibrary.filter(function(tag){return tag.toLowerCase()!==target.toLowerCase();}); let todosChanged=false; const now=Date.now(); state.todos=state.todos.map(function(todo){ const nextTags=(todo.tags||[]).filter(function(tag){return tag.toLowerCase()!==target.toLowerCase();}); if(nextTags.length!==(todo.tags||[]).length){ todosChanged=true; return Object.assign({},todo,{tags:nextTags,updatedAt:now}); } return todo; }); if(state.settings.activeTag&&state.settings.activeTag.toLowerCase()===target.toLowerCase()){ state.settings.activeTag=""; await persistSettings(); } await persistTagLibrary(); if(todosChanged) await db.putTodos(state.todos); emit(); return {ok:true,removedFromLibrary:before!==state.tagLibrary.length,todosChanged:todosChanged}; }
@@ -399,7 +457,7 @@
     function clearSelection(){ state.selectedIds=[]; emit(); }
     function selectVisible(){ state.selectedIds=getVisibleTodos().map(function(todo){return todo.id;}); emit(); return state.selectedIds.slice(); }
     async function bulkComplete(ids, completed){ const targetIds=(ids&&ids.length?ids:state.selectedIds).slice(); if(!targetIds.length) return {ok:false,error:"请先选择任务"}; pushHistory(completed?"批量完成":"批量取消完成"); for(const id of targetIds){ const todo=state.todos.find(function(item){return item.id===id;}); if(!todo||!!todo.completed===!!completed) continue; if(completed && todo.repeat && todo.repeat!=="none") await toggleTodo(id); else await updateTodo(id,{completed:!!completed}); } return {ok:true,count:targetIds.length}; }
-    async function bulkDelete(ids){ const targetIds=(ids&&ids.length?ids:state.selectedIds).slice(); if(!targetIds.length) return {ok:false,error:"请先选择任务"}; pushHistory("批量删除"); const set=new Set(targetIds); for(const id of targetIds) await db.deleteTodo(id); state.todos=state.todos.filter(function(todo){return !set.has(todo.id);}); state.selectedIds=state.selectedIds.filter(function(id){return !set.has(id);}); emit(); return {ok:true,count:targetIds.length}; }
+    async function bulkDelete(ids){ const targetIds=(ids&&ids.length?ids:state.selectedIds).slice(); if(!targetIds.length) return {ok:false,error:"请先选择任务"}; pushHistory("批量删除"); const set=new Set(targetIds); for(const id of targetIds) await db.deleteTodo(id); state.todos=state.todos.filter(function(todo){return !set.has(todo.id);}); state.selectedIds=state.selectedIds.filter(function(id){return !set.has(id);}); await recordTombstones("todo", targetIds); emit(); return {ok:true,count:targetIds.length}; }
     async function bulkMoveList(listId, ids){ const targetIds=(ids&&ids.length?ids:state.selectedIds).slice(); if(!targetIds.length) return {ok:false,error:"请先选择任务"}; const nextList=ensureListId(listId); pushHistory("批量移动清单"); for(const id of targetIds) await updateTodo(id,{listId:nextList}); return {ok:true,count:targetIds.length,listId:nextList}; }
     async function bulkArchive(ids, archived){ const targetIds=(ids&&ids.length?ids:state.selectedIds).slice(); if(!targetIds.length) return {ok:false,error:"请先选择任务"}; pushHistory(archived?"批量归档":"批量取消归档"); for(const id of targetIds) await archiveTodo(id, !!archived); return {ok:true,count:targetIds.length}; }
     async function undo(){ const snap=state.history.pop(); if(!snap) return {ok:false,error:"没有可撤销的操作"}; await restoreTodos(snap.todos); state.selectedIds=snap.selectedIds||[]; emit(); return {ok:true,label:snap.label||"变更"}; }
@@ -438,7 +496,9 @@
         todos: state.todos.map(function(item){ return Object.assign({}, item, { subtasks: (item.subtasks||[]).map(function(s){return Object.assign({},s);}), tags:(item.tags||[]).slice() }); }),
         lists: state.lists.map(function(item){ return Object.assign({}, item); }),
         tagLibrary: state.tagLibrary.slice(),
-        settings: Object.assign({}, state.settings)
+        templates: (state.templates || []).map(function(item){ return Object.assign({}, item, { tags: (item.tags||[]).slice() }); }),
+        tombstones: (state.tombstones || []).map(function(item){ return Object.assign({}, item); }),
+        settings: stripSecretsFromSettings(state.settings)
       };
     }
     async function persistBackupPoints(){
@@ -533,7 +593,9 @@
       const before=(state.templates||[]).length;
       state.templates=(state.templates||[]).filter(function(item){return item.id!==id;});
       if(state.templates.length===before) return {ok:false,error:"模板不存在"};
-      await persistTemplates(); emit(); return {ok:true};
+      await persistTemplates();
+      await recordTombstones("template", id);
+      emit(); return {ok:true};
     }
     async function applyTemplate(id){
       const tpl=(state.templates||[]).find(function(item){return item.id===id;});
@@ -574,15 +636,39 @@
       // normalize
       next.provider = next.provider === "http" ? "http" : "gist";
       next.enabled = !!next.enabled;
-      next.autoSync = !!next.autoSync;
+      const interval = Number(next.autoSyncInterval || 0);
+      next.autoSyncInterval = (interval === 1 || interval === 5 || interval === 15) ? interval : 0;
+      next.autoSync = !!next.autoSync || next.autoSyncInterval > 0;
+      if (next.autoSync && !next.autoSyncInterval) next.autoSyncInterval = 15;
       next.token = String(next.token || "");
       next.remoteId = String(next.remoteId || "").trim();
       next.endpoint = String(next.endpoint || "").trim();
       next.method = (next.method || "PUT").toUpperCase();
+      next.lastConflicts = Array.isArray(next.lastConflicts) ? next.lastConflicts.slice(0, 50) : [];
       state.settings.sync = next;
       await persistSettings();
       emit();
       return { ok:true, sync: Object.assign({}, next) };
+    }
+    async function clearTombstones(options){
+      options = options || {};
+      const before = (state.tombstones || []).length;
+      if (options.onlyExpired) {
+        const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+        state.tombstones = (state.tombstones || []).filter(function(item){ return (item.deletedAt || 0) >= cutoff; });
+      } else if (options.entity && options.id) {
+        state.tombstones = (state.tombstones || []).filter(function(item){
+          return !(item.entity === options.entity && item.id === options.id);
+        });
+      } else {
+        state.tombstones = [];
+      }
+      await persistTombstones();
+      emit();
+      return { ok:true, removed: Math.max(0, before - (state.tombstones || []).length), remaining: (state.tombstones || []).length };
+    }
+    async function listTombstones(){
+      return { ok:true, items: (state.tombstones || []).slice() };
     }
     async function applySyncPayload(payload, options){
       options = options || {};
@@ -592,7 +678,7 @@
       if(options.label) pushHistory(options.label);
       const incomingSettings = Object.assign({}, defaultSettings(), (payload && payload.settings) || {});
       incomingSettings.sync = localSync; // never overwrite secrets from remote
-      // importData currently resets lists/todos; call it then patch templates
+      // importData currently resets lists/todos; call it then patch templates/tombstones
       const result = await importData({
         todos: payload && payload.todos,
         lists: payload && payload.lists,
@@ -603,11 +689,15 @@
         state.templates = payload.templates.map(function(item,index){ return normalizeTemplate(item,index); }).filter(Boolean).slice(0,20);
         await db.setMeta("templates", state.templates);
       }
+      if(Array.isArray(payload && payload.tombstones)){
+        state.tombstones = payload.tombstones.slice();
+        await persistTombstones();
+      }
       emit();
       return { ok:true, count: result.count || 0 };
     }
     async function setDensity(density){ return setSettings({density: density==="compact"?"compact":"comfortable"}); }
-return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,setSyncConfig:setSyncConfig,getSyncConfig:getSyncConfig,applySyncPayload:applySyncPayload,saveTemplate:saveTemplate,deleteTemplate:deleteTemplate,applyTemplate:applyTemplate,pushRecentSearch:pushRecentSearch,clearRecentSearches:clearRecentSearches,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
+return {init:init,subscribe:subscribe,getSnapshot:getSnapshot,addTodo:addTodo,updateTodo:updateTodo,toggleTodo:toggleTodo,deleteTodo:deleteTodo,archiveTodo:archiveTodo,clearCompleted:clearCompleted,setSettings:setSettings,createList:createList,renameList:renameList,deleteList:deleteList,reorderVisible:reorderVisible,exportData:exportData,importData:importData,createTag:createTag,deleteTag:deleteTag,renameTag:renameTag,checkReminders:checkReminders,startReminderLoop:startReminderLoop,stopReminderLoop:stopReminderLoop,createSharePack:createSharePack,togglePin:togglePin,setSubtasks:setSubtasks,toggleSubtask:toggleSubtask,addSubtask:addSubtask,parseQuick:parseQuick,setSelectedIds:setSelectedIds,toggleSelected:toggleSelected,clearSelection:clearSelection,selectVisible:selectVisible,bulkComplete:bulkComplete,bulkDelete:bulkDelete,bulkMoveList:bulkMoveList,bulkSetPriority:bulkSetPriority,bulkAddTag:bulkAddTag,bulkArchive:bulkArchive,undo:undo,setDensity:setDensity,createBackup:createBackup,listBackups:listBackups,restoreBackup:restoreBackup,maybeAutoBackup:maybeAutoBackup,setSyncConfig:setSyncConfig,getSyncConfig:getSyncConfig,applySyncPayload:applySyncPayload,clearTombstones:clearTombstones,listTombstones:listTombstones,saveTemplate:saveTemplate,deleteTemplate:deleteTemplate,applyTemplate:applyTemplate,pushRecentSearch:pushRecentSearch,clearRecentSearches:clearRecentSearches,viewLabels:VIEW_LABELS,todayKey:todayKey,normalizeTags:normalizeTags,tagColor:tagColor,nextDueDate:nextDueDate,priorityRank:PRIORITY_RANK,parseQuickAdd:parseQuickAdd,normalizeSubtasks:normalizeSubtasks,subtaskProgress:subtaskProgress};
   }
   global.NovaStore={createStore:createStore,normalizeTodo:normalizeTodo,normalizeSubtasks:normalizeSubtasks,parseQuickAdd:parseQuickAdd,defaultSettings:defaultSettings,defaultLists:defaultLists,todayKey:todayKey,tagColor:tagColor,nextDueDate:nextDueDate,subtaskProgress:subtaskProgress};
 })(window);

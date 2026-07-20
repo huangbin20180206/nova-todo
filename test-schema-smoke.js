@@ -1,6 +1,8 @@
 const fs = require('fs');
+const path = require('path');
 const vm = require('vm');
-const files = ['outputs/todo-app/js/schema.js','outputs/todo-app/js/store.js'];
+const root = path.resolve(__dirname);
+const files = [path.join(root,'js/schema.js'), path.join(root,'js/store.js')];
 const mem = { todos: [], meta: {} };
 const fakeDb = {
   async getAllTodos(){ return mem.todos.map(t => Object.assign({}, t)); },
@@ -34,17 +36,16 @@ vm.createContext(ctx);
 for (const f of files) vm.runInContext(fs.readFileSync(f,'utf8'), ctx);
 
 (async () => {
-  // empty idb, schemaVersion 0, legacy localStorage present
   const store = ctx.window.NovaStore.createStore(fakeDb);
   const snap = await store.init();
   if (!snap.todos.some(t => t.text === '旧数据任务')) throw new Error('legacy not migrated');
-  if ((snap.schemaVersion || 0) < 3) throw new Error('schema version missing');
+  if ((snap.schemaVersion || 0) < 4) throw new Error('schema version missing');
   if (!mem.meta.schemaVersion) throw new Error('schemaVersion not persisted');
 
-  // broken orphan list + missing subtasks repaired on re-init
   mem.todos = [{ id:'x', text:'坏数据', listId:'missing-list', tags:'工作,生活', completed:0 }];
   mem.meta.schemaVersion = 1;
   mem.meta.lists = [{ id:'list-work', name:'工作', icon:'💼', order:1 }];
+  mem.meta.tombstones = [];
   const store2 = ctx.window.NovaStore.createStore(fakeDb);
   const snap2 = await store2.init();
   const todo = snap2.todos.find(t => t.text === '坏数据');
@@ -52,13 +53,14 @@ for (const f of files) vm.runInContext(fs.readFileSync(f,'utf8'), ctx);
   if (!Array.isArray(todo.subtasks)) throw new Error('subtasks not normalized');
   if (!Array.isArray(todo.tags)) throw new Error('tags not normalized');
   if (todo.listId === 'missing-list') throw new Error('orphan list not repaired');
+  if ((snap2.schemaVersion || 0) < 4) throw new Error('schema not upgraded to v4');
 
-  // template/search still works after migration path
   await store2.saveTemplate({ text:'模板A', name:'模板A', priority:'high', tags:['工作'] });
   await store2.pushRecentSearch('坏数据');
   const snap3 = store2.getSnapshot();
   if (!(snap3.templates||[]).length) throw new Error('templates broken');
   if (!(snap3.recentSearches||[]).includes('坏数据')) throw new Error('recent search broken');
+  if (!Array.isArray(snap3.tombstones)) throw new Error('tombstones missing');
 
   console.log(JSON.stringify({
     ok: true,
@@ -67,6 +69,7 @@ for (const f of files) vm.runInContext(fs.readFileSync(f,'utf8'), ctx);
     templates: snap3.templates.length,
     recent: snap3.recentSearches,
     listId: todo.listId,
-    tags: todo.tags
+    tags: todo.tags,
+    tombstones: snap3.tombstones.length
   }, null, 2));
 })().catch(err => { console.error('FAIL', err); process.exit(1); });

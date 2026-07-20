@@ -1,7 +1,9 @@
 const fs = require('fs');
+const path = require('path');
 const vm = require('vm');
-const storeSrc = fs.readFileSync('outputs/todo-app/js/store.js','utf8');
-const schemaSrc = fs.readFileSync('outputs/todo-app/js/schema.js','utf8');
+const root = path.resolve(__dirname);
+const storeSrc = fs.readFileSync(path.join(root,'js/store.js'),'utf8');
+const schemaSrc = fs.readFileSync(path.join(root,'js/schema.js'),'utf8');
 const mem = { todos: [], meta: {} };
 const fakeDb = {
   async getAllTodos(){ return mem.todos.map(t => Object.assign({}, t)); },
@@ -50,5 +52,9 @@ function assert(cond, msg){ if(!cond) throw new Error(msg); }
   assert(applied.ok, 'apply template');
   const bak = await store.createBackup('wave3');
   assert(bak.ok, 'backup');
-  console.log(JSON.stringify({ ok:true, schemaVersion: snap.schemaVersion, todos: store.getSnapshot().todos.length }, null, 2));
+  if (bak.backup && bak.backup.settings && bak.backup.settings.sync && bak.backup.settings.sync.token) throw new Error('backup token leak');
+  await store.deleteTodo(created.todo.id);
+  snap = store.getSnapshot();
+  assert((snap.tombstones||[]).some(t => t.id === created.todo.id), 'todo tombstone');
+  console.log(JSON.stringify({ ok:true, schemaVersion: snap.schemaVersion, todos: snap.todos.length, tombstones: snap.tombstones.length }, null, 2));
 })().catch(err => { console.error('FAIL', err); process.exit(1); });

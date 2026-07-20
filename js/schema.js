@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
 
-  var SCHEMA_VERSION = 3;
+  var SCHEMA_VERSION = 4;
 
   function asArray(value) {
     return Array.isArray(value) ? value : [];
@@ -17,8 +17,18 @@
     return next;
   }
 
+  function normalizeTombstone(item) {
+    if (!item || typeof item !== "object" || !item.id) return null;
+    return {
+      id: String(item.id),
+      entity: String(item.entity || "todo"),
+      deletedAt: typeof item.deletedAt === "number" ? item.deletedAt : Date.now(),
+      deviceId: item.deviceId || null
+    };
+  }
+
   function runMigrations(ctx) {
-    // ctx: { fromVersion, todos, lists, settings, tagLibrary, templates, backupPoints, helpers }
+    // ctx: { fromVersion, todos, lists, settings, tagLibrary, templates, backupPoints, tombstones, helpers }
     var helpers = ctx.helpers || {};
     var normalizeTodo = helpers.normalizeTodo;
     var normalizeList = helpers.normalizeList;
@@ -34,6 +44,7 @@
     var tagLibrary = asArray(ctx.tagLibrary);
     var templates = asArray(ctx.templates);
     var backupPoints = asArray(ctx.backupPoints);
+    var tombstones = asArray(ctx.tombstones).map(normalizeTombstone).filter(Boolean);
     var log = [];
 
     if (!lists.length && defaultLists) {
@@ -93,10 +104,31 @@
       version = 3;
     }
 
+    // v3 -> v4 collaboration tombstones
+    if (version < 4) {
+      tombstones = tombstones.map(normalizeTombstone).filter(Boolean);
+      log.push("migrate-to-v4-tombstones");
+      version = 4;
+    }
+
     // always normalize current schema once more for safety
     todos = todos.map(function (item, index) {
       return normalizeTodo(item, index, (lists[0] && lists[0].id) || "list-inbox");
     }).filter(function (item) { return !!(item && item.text); });
+    lists = lists.map(function (item, index) { return normalizeList(item, index); });
+    templates = templates.map(function (item, index) {
+      return normalizeTemplate ? normalizeTemplate(item, index) : item;
+    }).filter(Boolean).slice(0, 20);
+    tombstones = tombstones.map(normalizeTombstone).filter(Boolean);
+
+    function isTombstoned(entity, id, updatedAt) {
+      return tombstones.some(function (t) {
+        return t.entity === entity && t.id === id && (typeof updatedAt !== "number" || t.deletedAt >= updatedAt);
+      });
+    }
+    todos = todos.filter(function (item) { return !isTombstoned("todo", item.id, item.updatedAt); });
+    lists = lists.filter(function (item) { return !isTombstoned("list", item.id, item.updatedAt || item.createdAt); });
+    templates = templates.filter(function (item) { return !isTombstoned("template", item.id, item.updatedAt || item.createdAt); });
 
     return {
       version: SCHEMA_VERSION,
@@ -106,6 +138,7 @@
       tagLibrary: tagLibrary,
       templates: templates,
       backupPoints: backupPoints,
+      tombstones: tombstones,
       log: log,
       migrated: log.length > 0 || (typeof ctx.fromVersion === "number" ? ctx.fromVersion : 0) < SCHEMA_VERSION
     };
@@ -114,6 +147,7 @@
   global.NovaSchema = {
     SCHEMA_VERSION: SCHEMA_VERSION,
     runMigrations: runMigrations,
-    repairSettings: repairSettings
+    repairSettings: repairSettings,
+    normalizeTombstone: normalizeTombstone
   };
 })(window);
