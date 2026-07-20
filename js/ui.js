@@ -112,6 +112,20 @@
       btnEnableNotify: $("#btn-enable-notify"),
       btnSharePack: $("#btn-share-pack"),
       btnNew: $("#btn-new"),
+      densityToggle: $("#density-toggle"),
+      btnUndo: $("#btn-undo"),
+      btnShortcuts: $("#btn-shortcuts"),
+      shortcutsModal: $("#shortcuts-modal"),
+      shortcutsBackdrop: $("#shortcuts-backdrop"),
+      shortcutsClose: $("#shortcuts-close"),
+      bulkBar: $("#bulk-bar"),
+      bulkSelectAll: $("#bulk-select-all"),
+      bulkCount: $("#bulk-count"),
+      bulkComplete: $("#bulk-complete"),
+      bulkPin: $("#bulk-pin"),
+      bulkArchive: $("#bulk-archive"),
+      bulkDelete: $("#bulk-delete"),
+      bulkClear: $("#bulk-clear"),
       btnClearCompleted: $("#btn-clear-completed"),
       btnExport: $("#btn-export"),
       btnImport: $("#btn-import"),
@@ -123,6 +137,11 @@
       editorId: $("#editor-id"),
       editorText: $("#editor-text"),
       editorNotes: $("#editor-notes"),
+      editorSubtasks: $("#editor-subtasks"),
+      editorSubtasksCount: $("#editor-subtasks-count"),
+      editorSubtaskNew: $("#editor-subtask-new"),
+      editorSubtaskAdd: $("#editor-subtask-add"),
+      quickHint: $("#quick-hint"),
       editorList: $("#editor-list"),
       editorPriority: $("#editor-priority"),
       editorDue: $("#editor-due"),
@@ -149,6 +168,7 @@
 
     let dragFromId = null;
     let editorSelectedTags = [];
+    let editorSubtasks = [];
     let latestSnapshot = null;
 
     function toast(message, type) {
@@ -170,6 +190,70 @@
       document.documentElement.setAttribute("data-theme", theme === "light" ? "light" : "dark");
     }
 
+
+    function subtaskStats(list) {
+      const total = (list || []).length;
+      const done = (list || []).filter(function (item) { return item.completed; }).length;
+      return { total: total, done: done };
+    }
+
+    function renderEditorSubtasks() {
+      if (!els.editorSubtasks) return;
+      els.editorSubtasks.innerHTML = "";
+      const stats = subtaskStats(editorSubtasks);
+      if (els.editorSubtasksCount) els.editorSubtasksCount.textContent = stats.done + "/" + stats.total;
+      if (!editorSubtasks.length) {
+        const empty = document.createElement("p");
+        empty.className = "field-hint";
+        empty.textContent = "把大任务拆成可执行的小步骤。";
+        els.editorSubtasks.appendChild(empty);
+        return;
+      }
+      editorSubtasks.forEach(function (item, index) {
+        const row = document.createElement("div");
+        row.className = "subtask-row" + (item.completed ? " is-done" : "");
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = !!item.completed;
+        check.addEventListener("change", function () {
+          editorSubtasks[index] = Object.assign({}, item, { completed: check.checked });
+          renderEditorSubtasks();
+        });
+        const input = document.createElement("input");
+        input.type = "text";
+        input.maxLength = 120;
+        input.value = item.text || "";
+        input.addEventListener("input", function () {
+          editorSubtasks[index] = Object.assign({}, editorSubtasks[index], { text: input.value });
+        });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "ghost-btn";
+        del.textContent = "删除";
+        del.addEventListener("click", function () {
+          editorSubtasks.splice(index, 1);
+          renderEditorSubtasks();
+        });
+        row.appendChild(check);
+        row.appendChild(input);
+        row.appendChild(del);
+        els.editorSubtasks.appendChild(row);
+      });
+    }
+
+    function addEditorSubtask(text) {
+      const cleaned = String(text || "").trim();
+      if (!cleaned) return false;
+      editorSubtasks.push({
+        id: (global.crypto && crypto.randomUUID) ? crypto.randomUUID() : ("sub-" + Date.now() + "-" + Math.random().toString(16).slice(2)),
+        text: cleaned.slice(0, 120),
+        completed: false,
+        order: (editorSubtasks.length + 1) * 1000,
+      });
+      renderEditorSubtasks();
+      return true;
+    }
+
     function openEditor(todo) {
       els.editorId.value = todo ? todo.id : "";
       els.editorTitle.textContent = todo ? "编辑任务" : "新建任务";
@@ -188,7 +272,9 @@
       if (els.editorRemindEnabled) els.editorRemindEnabled.checked = !!(todo && todo.remindEnabled);
       if (els.editorRemindTime) els.editorRemindTime.value = todo && todo.remindTime ? todo.remindTime : "09:00";
       editorSelectedTags = todo ? (todo.tags || []).slice() : [];
+      editorSubtasks = todo ? (todo.subtasks || []).map(function (item) { return Object.assign({}, item); }) : [];
       renderEditorTagPicker();
+      renderEditorSubtasks();
       els.editorArchive.textContent = todo && todo.archived ? "取消归档" : "归档";
       els.editorArchive.hidden = !todo;
       els.editorDelete.hidden = !todo;
@@ -512,7 +598,8 @@
     function createCard(todo, snapshot) {
       const today = store.todayKey();
       const card = document.createElement("article");
-      card.className = "todo-card" + (todo.completed ? " is-completed" : "");
+      const selected = (snapshot.selectedIds || []).indexOf(todo.id) !== -1;
+      card.className = "todo-card" + (todo.completed ? " is-completed" : "") + (todo.pinned ? " is-pinned" : "") + (selected ? " is-selected" : "");
       card.draggable = snapshot.settings.sort === "manual";
       card.dataset.id = todo.id;
 
@@ -525,6 +612,17 @@
       left.style.alignItems = "flex-start";
       left.style.minWidth = "0";
 
+      const selectBox = document.createElement("input");
+      selectBox.type = "checkbox";
+      selectBox.className = "todo-card__select";
+      selectBox.checked = selected;
+      selectBox.title = "选择任务";
+      selectBox.addEventListener("click", function (event) { event.stopPropagation(); });
+      selectBox.addEventListener("change", function (event) {
+        event.stopPropagation();
+        store.toggleSelected(todo.id);
+      });
+
       const checkbox = document.createElement("button");
       checkbox.type = "button";
       checkbox.className = "checkbox" + (todo.completed ? " is-checked" : "");
@@ -535,7 +633,9 @@
         if (!todo.completed) {
           card.classList.add("is-completing");
         }
-        store.toggleTodo(todo.id);
+        store.toggleTodo(todo.id).then(function (result) {
+          if (result && result.repeated) toast("已完成，并生成下一次重复任务");
+        });
       });
 
       const titleWrap = document.createElement("div");
@@ -553,6 +653,7 @@
       titleRow.appendChild(title);
       titleWrap.appendChild(titleRow);
 
+      left.appendChild(selectBox);
       left.appendChild(checkbox);
       left.appendChild(titleWrap);
 
@@ -567,6 +668,49 @@
       const notes = document.createElement("p");
       notes.className = "todo-card__notes";
       notes.textContent = todo.notes || "暂无备注，点击卡片可补充细节。";
+
+      const subtasksWrap = document.createElement("div");
+      subtasksWrap.className = "todo-card__subtasks";
+      const subs = todo.subtasks || [];
+      if (subs.length) {
+        const stats = subtaskStats(subs);
+        const progress = document.createElement("div");
+        progress.className = "todo-card__progress";
+        const label = document.createElement("span");
+        label.textContent = "子任务 " + stats.done + "/" + stats.total;
+        const bar = document.createElement("div");
+        bar.className = "todo-card__progress-bar";
+        const fill = document.createElement("span");
+        fill.style.width = Math.round((stats.total ? stats.done / stats.total : 0) * 100) + "%";
+        bar.appendChild(fill);
+        progress.appendChild(label);
+        progress.appendChild(bar);
+        subtasksWrap.appendChild(progress);
+        subs.slice(0, 4).forEach(function (item) {
+          const row = document.createElement("label");
+          row.className = "todo-card__subtask-item" + (item.completed ? " is-done" : "");
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.checked = !!item.completed;
+          check.addEventListener("click", function (event) { event.stopPropagation(); });
+          check.addEventListener("change", function (event) {
+            event.stopPropagation();
+            store.toggleSubtask(todo.id, item.id);
+          });
+          const text = document.createElement("span");
+          text.textContent = item.text;
+          row.appendChild(check);
+          row.appendChild(text);
+          subtasksWrap.appendChild(row);
+        });
+        if (subs.length > 4) {
+          const more = document.createElement("div");
+          more.className = "muted";
+          more.style.fontSize = "12px";
+          more.textContent = "还有 " + (subs.length - 4) + " 项，点击卡片查看全部";
+          subtasksWrap.appendChild(more);
+        }
+      }
 
       const meta = document.createElement("div");
       meta.className = "todo-card__meta";
@@ -591,6 +735,9 @@
 
       if (todo.archived) {
         meta.appendChild(makeBadge("📦 已归档", "badge--archived"));
+      }
+      if (todo.pinned) {
+        meta.appendChild(makeBadge("📌 置顶", "badge--pinned"));
       }
 
       const list = ((snapshot.lists || []).find(function (item) { return item.id === todo.listId; })) || null;
@@ -617,6 +764,17 @@
       const actions = document.createElement("div");
       actions.className = "todo-card__actions";
 
+      const pinBtn = document.createElement("button");
+      pinBtn.type = "button";
+      pinBtn.className = "ghost-btn";
+      pinBtn.textContent = todo.pinned ? "取消置顶" : "置顶";
+      pinBtn.addEventListener("click", function (event) {
+        event.stopPropagation();
+        store.togglePin(todo.id).then(function () {
+          toast(todo.pinned ? "已取消置顶" : "已置顶");
+        });
+      });
+
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "ghost-btn";
@@ -639,12 +797,14 @@
         }
       });
 
+      actions.appendChild(pinBtn);
       actions.appendChild(editBtn);
       actions.appendChild(deleteBtn);
       foot.appendChild(actions);
 
       card.appendChild(top);
       card.appendChild(notes);
+      if ((todo.subtasks || []).length) card.appendChild(subtasksWrap);
       card.appendChild(meta);
       if ((todo.tags || []).length) card.appendChild(tags);
       card.appendChild(foot);
@@ -879,6 +1039,24 @@
       if (els.btnEnableNotify) {
         els.btnEnableNotify.textContent = snapshot.settings.notificationsEnabled ? "提醒已开启" : "开启浏览器提醒";
       }
+      if (els.btnUndo) els.btnUndo.disabled = !snapshot.canUndo;
+      document.documentElement.setAttribute("data-density", snapshot.settings.density === "compact" ? "compact" : "comfortable");
+      if (els.densityToggle) {
+        els.densityToggle.title = snapshot.settings.density === "compact" ? "切换到舒适模式" : "切换到紧凑模式";
+      }
+    }
+
+    function renderBulkBar(snapshot) {
+      if (!els.bulkBar) return;
+      const selected = snapshot.selectedIds || [];
+      const visibleIds = (snapshot.visibleTodos || []).map(function (todo) { return todo.id; });
+      const selectedVisible = selected.filter(function (id) { return visibleIds.indexOf(id) !== -1; });
+      els.bulkBar.hidden = selected.length === 0;
+      if (els.bulkCount) els.bulkCount.textContent = "已选 " + selected.length + " 项";
+      if (els.bulkSelectAll) {
+        els.bulkSelectAll.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
+        els.bulkSelectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
+      }
     }
 
     function render(snapshot) {
@@ -891,6 +1069,7 @@
       fillListSelects(snapshot);
       renderTags(snapshot);
       renderStats(snapshot);
+      renderBulkBar(snapshot);
       renderBoard(snapshot);
       if (!els.drawer.hidden) {
         renderEditorTagPicker();
@@ -926,10 +1105,26 @@
 
       els.quickForm.addEventListener("submit", function (event) {
         event.preventDefault();
-        store.addTodo({
-          text: els.quickInput.value,
+        const parsed = store.parseQuick(els.quickInput.value, {
           priority: els.quickPriority.value,
           listId: els.quickList && els.quickList.value ? els.quickList.value : undefined,
+        });
+        if (!parsed.ok) {
+          showError(parsed.error || "请输入待办内容，空内容不能添加。");
+          els.quickInput.focus();
+          return;
+        }
+        const payload = parsed.payload;
+        store.addTodo({
+          text: payload.text,
+          priority: payload.priority || els.quickPriority.value,
+          listId: payload.listId || (els.quickList && els.quickList.value ? els.quickList.value : undefined),
+          dueDate: payload.dueDate,
+          tags: payload.tags,
+          repeat: payload.repeat,
+          remindEnabled: payload.remindEnabled,
+          remindTime: payload.remindTime,
+          subtasks: payload.subtasks,
         }).then(function (result) {
           if (!result.ok) {
             showError(result.error);
@@ -939,8 +1134,10 @@
           showError("");
           els.quickForm.reset();
           els.quickPriority.value = "medium";
+          fillListSelects(latestSnapshot || store.getSnapshot());
           els.quickInput.focus();
-          toast("任务已创建");
+          const extra = parsed.tokens && parsed.tokens.length ? (" · " + parsed.tokens.slice(0, 4).join(" ")) : "";
+          toast("任务已创建" + extra);
         });
       });
 
@@ -951,6 +1148,78 @@
       els.btnNew.addEventListener("click", function () {
         openEditor(null);
       });
+
+      function openShortcuts() {
+        if (!els.shortcutsModal) return;
+        els.shortcutsModal.hidden = false;
+        if (els.shortcutsBackdrop) els.shortcutsBackdrop.hidden = false;
+      }
+      function closeShortcuts() {
+        if (!els.shortcutsModal) return;
+        els.shortcutsModal.hidden = true;
+        if (els.shortcutsBackdrop) els.shortcutsBackdrop.hidden = true;
+      }
+
+      if (els.densityToggle) {
+        els.densityToggle.addEventListener("click", function () {
+          const next = (latestSnapshot && latestSnapshot.settings && latestSnapshot.settings.density) === "compact" ? "comfortable" : "compact";
+          store.setDensity(next).then(function () {
+            toast(next === "compact" ? "已切换紧凑模式" : "已切换舒适模式");
+          });
+        });
+      }
+      if (els.btnUndo) {
+        els.btnUndo.addEventListener("click", function () {
+          store.undo().then(function (result) {
+            if (!result.ok) toast(result.error || "无法撤销", "error");
+            else toast("已撤销：" + (result.label || "变更"));
+          });
+        });
+      }
+      if (els.btnShortcuts) els.btnShortcuts.addEventListener("click", openShortcuts);
+      if (els.shortcutsClose) els.shortcutsClose.addEventListener("click", closeShortcuts);
+      if (els.shortcutsBackdrop) els.shortcutsBackdrop.addEventListener("click", closeShortcuts);
+
+      if (els.bulkSelectAll) {
+        els.bulkSelectAll.addEventListener("change", function () {
+          if (els.bulkSelectAll.checked) store.selectVisible();
+          else store.clearSelection();
+        });
+      }
+      if (els.bulkComplete) {
+        els.bulkComplete.addEventListener("click", function () {
+          store.bulkComplete(null, true).then(function (result) {
+            if (!result.ok) toast(result.error || "操作失败", "error");
+            else toast("已批量完成 " + result.count + " 项");
+          });
+        });
+      }
+      if (els.bulkPin) {
+        els.bulkPin.addEventListener("click", async function () {
+          const ids = (latestSnapshot && latestSnapshot.selectedIds) || [];
+          if (!ids.length) return toast("请先选择任务", "error");
+          for (const id of ids) await store.togglePin(id);
+          toast("已切换置顶状态");
+        });
+      }
+      if (els.bulkArchive) {
+        els.bulkArchive.addEventListener("click", function () {
+          store.bulkArchive(null, true).then(function (result) {
+            if (!result.ok) toast(result.error || "操作失败", "error");
+            else toast("已批量归档 " + result.count + " 项");
+          });
+        });
+      }
+      if (els.bulkDelete) {
+        els.bulkDelete.addEventListener("click", function () {
+          if (!confirm("确定删除选中的任务吗？")) return;
+          store.bulkDelete().then(function (result) {
+            if (!result.ok) toast(result.error || "操作失败", "error");
+            else toast("已删除 " + result.count + " 项");
+          });
+        });
+      }
+      if (els.bulkClear) els.bulkClear.addEventListener("click", function () { store.clearSelection(); });
 
       if (els.emptyAction) {
         els.emptyAction.addEventListener("click", function () {
@@ -1140,12 +1409,36 @@
       els.editorClose.addEventListener("click", closeEditor);
       els.drawerBackdrop.addEventListener("click", closeEditor);
 
+      if (els.editorSubtaskAdd) {
+        els.editorSubtaskAdd.addEventListener("click", function () {
+          if (addEditorSubtask(els.editorSubtaskNew ? els.editorSubtaskNew.value : "")) {
+            if (els.editorSubtaskNew) els.editorSubtaskNew.value = "";
+          }
+        });
+      }
+      if (els.editorSubtaskNew) {
+        els.editorSubtaskNew.addEventListener("keydown", function (event) {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (addEditorSubtask(els.editorSubtaskNew.value)) els.editorSubtaskNew.value = "";
+          }
+        });
+      }
+
       els.editorForm.addEventListener("submit", function (event) {
         event.preventDefault();
         const id = els.editorId.value;
         const payload = {
           text: els.editorText.value,
           notes: els.editorNotes.value,
+          subtasks: (editorSubtasks || []).map(function (item, index) {
+            return {
+              id: item.id,
+              text: String(item.text || "").trim(),
+              completed: !!item.completed,
+              order: typeof item.order === "number" ? item.order : (index + 1) * 1000,
+            };
+          }).filter(function (item) { return !!item.text; }),
           priority: els.editorPriority.value,
           dueDate: els.editorDue.value || null,
           tags: editorSelectedTags.slice(),
@@ -1193,14 +1486,51 @@
       });
 
       document.addEventListener("keydown", function (event) {
+        const tag = (event.target && event.target.tagName) || "";
+        const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (event.target && event.target.isContentEditable);
+
         if (event.key === "Escape") {
-          if (!els.tagManager.hidden) {
-            closeTagManager();
-            return;
-          }
-          if (!els.drawer.hidden) {
-            closeEditor();
-          }
+          if (els.shortcutsModal && !els.shortcutsModal.hidden) { closeShortcuts(); return; }
+          if (!els.tagManager.hidden) { closeTagManager(); return; }
+          if (!els.drawer.hidden) { closeEditor(); return; }
+          store.clearSelection();
+          return;
+        }
+        if ((event.ctrlKey || event.metaKey) && (event.key === "z" || event.key === "Z")) {
+          if (typing) return;
+          event.preventDefault();
+          store.undo().then(function (result) {
+            if (!result.ok) toast(result.error || "无法撤销", "error");
+            else toast("已撤销：" + (result.label || "变更"));
+          });
+          return;
+        }
+        if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
+          if (typing) return;
+          event.preventDefault();
+          store.selectVisible();
+          return;
+        }
+        if (event.key === "Delete") {
+          if (typing) return;
+          const ids = (latestSnapshot && latestSnapshot.selectedIds) || [];
+          if (!ids.length) return;
+          event.preventDefault();
+          if (!confirm("确定删除选中的任务吗？")) return;
+          store.bulkDelete(ids).then(function (result) {
+            if (result.ok) toast("已删除 " + result.count + " 项");
+          });
+          return;
+        }
+        if (typing) return;
+        if (event.key === "n" || event.key === "N") {
+          event.preventDefault();
+          openEditor(null);
+        } else if (event.key === "/") {
+          event.preventDefault();
+          if (els.searchInput) els.searchInput.focus();
+        } else if (event.key === "?") {
+          openShortcuts();
         }
       });
     }

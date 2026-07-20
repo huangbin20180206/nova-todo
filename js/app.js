@@ -35,6 +35,11 @@
           ui.toast("提醒：" + todo.text);
         });
       }
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("./sw.js").catch(function (error) {
+          console.warn("SW register failed", error);
+        });
+      }
       const input = document.querySelector("#quick-input");
       if (input) input.focus();
     } catch (error) {

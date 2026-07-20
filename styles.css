@@ -663,3 +663,126 @@ select option {
   cursor: pointer;
 }
 .filter-chip:hover { transform: translateY(-1px); }
+
+
+.bulk-bar {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--line));
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.bulk-bar[hidden] { display: none !important; }
+.bulk-bar__left, .bulk-bar__actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bulk-check { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); }
+.todo-card.is-selected { border-color: color-mix(in srgb, var(--primary) 55%, var(--line)); box-shadow: var(--glow); }
+.todo-card.is-pinned { border-color: color-mix(in srgb, #fbbf24 45%, var(--line)); }
+.todo-card__select { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--primary); }
+.badge--pinned { color: #fcd34d; }
+html[data-density="compact"] .todo-card { min-height: auto; padding: 12px; gap: 8px; }
+html[data-density="compact"] .todo-card__notes { -webkit-line-clamp: 2; min-height: 2.6em; }
+html[data-density="compact"] .todo-board { gap: 10px; }
+html[data-density="compact"] .main { padding: 14px; gap: 12px; }
+.shortcuts-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 28px)); z-index: 40; border-radius: 24px; padding: 20px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+}
+.shortcuts-modal[hidden] { display: none !important; }
+.shortcuts-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.shortcuts-list li {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-strong) 80%, transparent);
+}
+.shortcuts-list span { color: var(--muted); }
+kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.6em; padding: 3px 7px; border-radius: 8px;
+  border: 1px solid var(--line); background: color-mix(in srgb, var(--panel-strong) 90%, transparent);
+  font-size: 0.85rem;
+}
+
+
+/* Subtasks + quick-add polish */
+.quick-hint {
+  margin: 8px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.subtask-editor, .todo-card__subtasks {
+  display: grid;
+  gap: 8px;
+}
+.subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+.subtask-row input[type="checkbox"] { width: 16px; height: 16px; }
+.subtask-row input[type="text"], .subtask-row .subtask-text {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.subtask-row.is-done .subtask-text,
+.subtask-row.is-done input[type="text"] {
+  text-decoration: line-through;
+  opacity: 0.62;
+}
+.subtask-row .icon-btn,
+.subtask-row .ghost-btn {
+  padding: 4px 8px;
+  min-height: 28px;
+}
+.todo-card__subtasks {
+  margin-top: 2px;
+}
+.todo-card__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.todo-card__progress-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 80%, transparent);
+  overflow: hidden;
+}
+.todo-card__progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #60a5fa, #a78bfa);
+}
+.todo-card__subtask-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.todo-card__subtask-item.is-done {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
+/* Mobile polish */
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: relative; height: auto; max-height: none; }
+  .topbar, .quick-form, .bulk-bar, .bulk-bar__actions { flex-wrap: wrap; }
+  .quick-form input, .quick-form select, .quick-form button { width: 100%; }
+  .todo-card__actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .editor-drawer { width: min(100vw, 480px); }
+}

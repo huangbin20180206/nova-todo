@@ -1,0 +1,18 @@
+{
+  "name": "Nova Todo 智能待办",
+  "short_name": "Nova Todo",
+  "description": "本地优先的智能待办清单",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#070b16",
+  "theme_color": "#6d7cff",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nova Todo · 智能待办</title>
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#6d7cff" />
+  <link rel="icon" href="./icons/icon.svg" />
 </head>
 <body>
   <div class="bg-orb bg-orb--a" aria-hidden="true"></div>
@@ -108,6 +111,9 @@
             </select>
           </label>
           <button id="theme-toggle" class="icon-btn" type="button" title="切换主题" aria-label="切换主题">◐</button>
+          <button id="density-toggle" class="icon-btn" type="button" title="紧凑/舒适模式" aria-label="紧凑模式">☰</button>
+          <button id="btn-undo" class="ghost-btn" type="button" title="撤销 (Ctrl+Z)">↩ 撤销</button>
+          <button id="btn-shortcuts" class="ghost-btn" type="button" title="快捷键">⌨️</button>
           <button id="btn-clear-completed" class="ghost-btn" type="button">清理已完成</button>
           <button id="btn-new" class="primary-btn" type="button">+ 新建任务</button>
         </div>
@@ -115,7 +121,7 @@
 
       <section class="composer-panel" aria-label="快速创建">
         <form id="quick-form" class="quick-form" novalidate>
-          <input id="quick-input" type="text" maxlength="200" placeholder="快速添加：写下任务，Enter 创建" autocomplete="off" />
+          <input id="quick-input" type="text" maxlength="200" placeholder="快加：明天 3点 交报告 #工作 !! | 写大纲 / 发邮件" autocomplete="off" />
           <select id="quick-list" aria-label="清单"></select>
           <select id="quick-priority" aria-label="优先级">
             <option value="medium">🔵 中优先级</option>
@@ -125,6 +131,7 @@
           </select>
           <button class="primary-btn" type="submit">添加</button>
         </form>
+        <p id="quick-hint" class="quick-hint">支持：今天/明天/下周一、!!紧急、#标签、@清单、提醒09:30、每天、| 子任务1 / 子任务2</p>
         <p id="form-error" class="form-error" role="alert" hidden></p>
       </section>
 
@@ -149,6 +156,19 @@
       <section id="active-filters" class="active-filters" hidden>
         <div id="active-filters-list" class="active-filters__list"></div>
         <button id="btn-clear-filters" class="ghost-btn" type="button">清除筛选</button>
+      </section>
+      <section id="bulk-bar" class="bulk-bar" hidden>
+        <div class="bulk-bar__left">
+          <label class="bulk-check"><input id="bulk-select-all" type="checkbox" /> 全选当前</label>
+          <span id="bulk-count" class="muted">已选 0 项</span>
+        </div>
+        <div class="bulk-bar__actions">
+          <button id="bulk-complete" class="ghost-btn" type="button">✓ 完成</button>
+          <button id="bulk-pin" class="ghost-btn" type="button">📌 置顶</button>
+          <button id="bulk-archive" class="ghost-btn" type="button">📦 归档</button>
+          <button id="bulk-delete" class="danger-btn" type="button">删除</button>
+          <button id="bulk-clear" class="ghost-btn" type="button">取消选择</button>
+        </div>
       </section>
 
       <section id="todo-board" class="todo-board" aria-live="polite"></section>
@@ -181,8 +201,19 @@
       </label>
       <label>
         <span>备注</span>
-        <textarea id="editor-notes" rows="5" maxlength="2000" placeholder="补充细节、链接、验收标准…"></textarea>
+        <textarea id="editor-notes" rows="4" maxlength="2000" placeholder="补充细节、链接、验收标准…"></textarea>
       </label>
+      <div class="field-block" id="editor-subtasks-block">
+        <div class="field-block__head">
+          <span>子任务清单</span>
+          <span id="editor-subtasks-count" class="muted">0/0</span>
+        </div>
+        <div id="editor-subtasks" class="subtask-editor" aria-live="polite"></div>
+        <div class="tag-picker-row">
+          <input id="editor-subtask-new" type="text" maxlength="120" placeholder="添加子任务，回车确认" autocomplete="off" />
+          <button id="editor-subtask-add" class="ghost-btn" type="button">添加</button>
+        </div>
+      </div>
       <div class="editor-grid">
         <label>
           <span>所属清单</span>
@@ -270,7 +301,27 @@
     <div id="tag-manager-list" class="tag-manager-list"></div>
     <p class="field-hint">删除标签库中的标签时，会同时从相关任务中移除该标签。</p>
   </aside>
-<div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+<div id="shortcuts-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="shortcuts-modal" class="shortcuts-modal" hidden>
+    <div class="editor-drawer__head">
+      <div>
+        <p class="eyebrow">Keyboard</p>
+        <h2>快捷键</h2>
+      </div>
+      <button id="shortcuts-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </div>
+    <ul class="shortcuts-list">
+      <li><kbd>N</kbd><span>新建任务</span></li>
+      <li><kbd>/</kbd><span>聚焦搜索</span></li>
+      <li><kbd>Ctrl</kbd> + <kbd>Z</kbd><span>撤销</span></li>
+      <li><kbd>Ctrl</kbd> + <kbd>A</kbd><span>全选当前列表</span></li>
+      <li><kbd>Delete</kbd><span>删除已选任务</span></li>
+      <li><kbd>Esc</kbd><span>关闭弹层 / 取消选择</span></li>
+      <li><kbd>快加语法</kbd><span>明天 !! #工作 @生活 提醒09:30 | a / b</span></li>
+    </ul>
+  </aside>
+
+  <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
   <script src="./js/db.js"></script>
   <script src="./js/store.js"></script>
