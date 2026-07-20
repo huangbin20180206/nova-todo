@@ -35,11 +35,27 @@
           ui.toast("提醒：" + todo.text);
         });
       }
-      if ("serviceWorker" in navigator) {
+
+      if (window.NovaPwa && typeof window.NovaPwa.createPwa === "function") {
+        const pwa = window.NovaPwa.createPwa({
+          toast: function (msg) { ui.toast(msg); },
+          banner: document.querySelector("#pwa-update-banner"),
+          reloadBtn: document.querySelector("#btn-pwa-reload"),
+          dismissBtn: document.querySelector("#btn-pwa-dismiss"),
+          statusEl: document.querySelector("#pwa-status"),
+        });
+        await pwa.register();
+      } else if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("./sw.js").catch(function (error) {
           console.warn("SW register failed", error);
         });
       }
+
+      const schemaLabel = document.querySelector("#schema-version");
+      if (schemaLabel) {
+        schemaLabel.textContent = "schema v" + ((snapshot && snapshot.schemaVersion) || (window.NovaSchema && window.NovaSchema.SCHEMA_VERSION) || 3);
+      }
+
       const input = document.querySelector("#quick-input");
       if (input) input.focus();
     } catch (error) {

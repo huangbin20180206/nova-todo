@@ -203,7 +203,7 @@
     function cloneTodos(){ return state.todos.map(function(todo){ return Object.assign({}, todo, { tags: (todo.tags||[]).slice(), subtasks: (todo.subtasks||[]).map(function(s){ return Object.assign({}, s); }) }); }); }
     function pushHistory(label){ state.history.push({ label: label || "变更", todos: cloneTodos(), selectedIds: state.selectedIds.slice(), at: Date.now() }); if (state.history.length > 30) state.history.shift(); }
     async function restoreTodos(todos){ state.todos = (todos || []).map(function(item, index){ return normalizeTodo(item, index, state.lists[0].id); }); await db.clearTodos(); if (state.todos.length) await db.putTodos(state.todos); }
-    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8)}; }
+    function getSnapshot(){ return {todos:state.todos.slice(),lists:state.lists.slice().sort(function(a,b){return a.order-b.order;}),settings:Object.assign({},state.settings),tagLibrary:state.tagLibrary.slice(),ready:state.ready,schemaVersion:(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||3,counts:getCounts(),listCounts:getListCounts(),tags:getTagStats(),managedTags:getManagedTags(),stats:getStats(),focusTodos:getFocusTodos(),visibleTodos:getVisibleTodos(),upcomingReminders:getUpcomingReminders(),selectedIds:state.selectedIds.slice(),canUndo:state.history.length>0,backupPoints:(state.backupPoints||[]).slice(0,10),lastBackupAt:state.settings.lastBackupAt||null,templates:(state.templates||[]).slice(),recentSearches:(state.settings.recentSearches||[]).slice(0,8)}; }
     function subscribe(fn){ listeners.add(fn); return function(){ listeners.delete(fn); }; }
     function listExists(id){ return state.lists.some(function(list){return list.id===id;}); }
     function ensureListId(listId){ if(listId&&listExists(listId)) return listId; return state.lists[0]?state.lists[0].id:"list-inbox"; }
@@ -240,36 +240,81 @@
     function stopReminderLoop(){ if(reminderTimer){ global.clearInterval(reminderTimer); reminderTimer=null; } }
 
     async function init(){
-      const [todos,settings,lists,tagLibrary,backupPoints,templates]=await Promise.all([db.getAllTodos(),db.getMeta("settings",defaultSettings()),db.getMeta("lists",null),db.getMeta("tagLibrary",null),db.getMeta("backupPoints",[]),db.getMeta("templates",[])]);
-      if(Array.isArray(lists)&&lists.length){ state.lists=lists.map(function(item,index){return normalizeList(item,index);}); }
-      else { state.lists=defaultLists(); await persistLists(); }
-      let migrated=false;
+      const [todos,settings,lists,tagLibrary,backupPoints,templates,schemaVersion]=await Promise.all([
+        db.getAllTodos(),
+        db.getMeta("settings",defaultSettings()),
+        db.getMeta("lists",null),
+        db.getMeta("tagLibrary",null),
+        db.getMeta("backupPoints",[]),
+        db.getMeta("templates",[]),
+        db.getMeta("schemaVersion",0)
+      ]);
+
+      // legacy localStorage v1 once
+      let sourceTodos = todos || [];
       try{
         const legacyRaw=global.localStorage.getItem("todo-app.v1");
-        if(legacyRaw&&(!todos||!todos.length)){
+        if(legacyRaw&&(!sourceTodos||!sourceTodos.length)){
           const legacy=JSON.parse(legacyRaw);
           if(legacy&&Array.isArray(legacy.todos)&&legacy.todos.length){
-            state.todos=legacy.todos.map(function(item,index){ return normalizeTodo({id:item.id,text:item.text,completed:item.completed,createdAt:item.createdAt,updatedAt:item.createdAt,order:item.createdAt||index,listId:state.lists[0].id},index,state.lists[0].id); });
-            await db.putTodos(state.todos); migrated=true;
+            sourceTodos=legacy.todos;
           }
         }
       }catch(error){ console.warn("legacy migration skipped", error); }
-      if(!migrated){
-        state.todos=(todos||[]).map(function(item,index){ return normalizeTodo(item,index,state.lists[0].id); });
-        let repaired=false;
-        state.todos=state.todos.map(function(todo){ if(!listExists(todo.listId)){ repaired=true; return Object.assign({},todo,{listId:state.lists[0].id}); } return todo; });
-        if(repaired) await db.putTodos(state.todos);
+
+      const migrated = (global.NovaSchema && typeof global.NovaSchema.runMigrations === "function")
+        ? global.NovaSchema.runMigrations({
+            fromVersion: typeof schemaVersion === "number" ? schemaVersion : 0,
+            todos: sourceTodos,
+            lists: lists,
+            settings: settings,
+            tagLibrary: tagLibrary,
+            templates: templates,
+            backupPoints: backupPoints,
+            helpers: {
+              normalizeTodo: normalizeTodo,
+              normalizeList: normalizeList,
+              normalizeTemplate: normalizeTemplate,
+              uniqueTags: uniqueTags,
+              defaultLists: defaultLists,
+              defaultSettings: defaultSettings
+            }
+          })
+        : null;
+
+      if(migrated){
+        state.lists = migrated.lists;
+        state.todos = migrated.todos;
+        state.settings = Object.assign(defaultSettings(), migrated.settings || {});
+        state.tagLibrary = migrated.tagLibrary || [];
+        state.templates = migrated.templates || [];
+        state.backupPoints = migrated.backupPoints || [];
+        if(migrated.migrated){
+          await persistLists();
+          await db.putTodos(state.todos);
+          await persistSettings();
+          await persistTagLibrary();
+          await db.setMeta("templates", state.templates);
+          await db.setMeta("backupPoints", state.backupPoints);
+          await db.setMeta("schemaVersion", migrated.version || (global.NovaSchema && global.NovaSchema.SCHEMA_VERSION) || 3);
+          if(migrated.log && migrated.log.length){ console.info("Nova schema migration:", migrated.log.join(", ")); }
+        } else {
+          await db.setMeta("schemaVersion", migrated.version || 3);
+        }
+      } else {
+        // fallback old path
+        if(Array.isArray(lists)&&lists.length){ state.lists=lists.map(function(item,index){return normalizeList(item,index);}); }
+        else { state.lists=defaultLists(); await persistLists(); }
+        state.todos=(sourceTodos||[]).map(function(item,index){ return normalizeTodo(item,index,state.lists[0].id); }).filter(function(item){return !!item.text;});
+        state.settings=Object.assign(defaultSettings(), settings||{});
+        state.tagLibrary=Array.isArray(tagLibrary)?uniqueTags(tagLibrary):[];
+        state.templates=Array.isArray(templates)?templates.map(function(item,index){return normalizeTemplate(item,index);}).filter(Boolean):[];
+        state.backupPoints=Array.isArray(backupPoints)?backupPoints:[];
+        await db.setMeta("schemaVersion", (global.NovaSchema && global.NovaSchema.SCHEMA_VERSION) || 3);
       }
-      state.settings=Object.assign(defaultSettings(),settings||{});
-      if(!VIEW_LABELS[state.settings.view]) state.settings.view="all";
-      if(state.settings.activeListId!=="all"&&!listExists(state.settings.activeListId)) state.settings.activeListId="all";
-      if(Array.isArray(tagLibrary)&&tagLibrary.length){ state.tagLibrary=uniqueTags(tagLibrary); }
-      else {
-        const used=[]; state.todos.forEach(function(todo){ (todo.tags||[]).forEach(function(tag){ used.push(tag); }); });
-        state.tagLibrary=uniqueTags(used.concat(["工作","设计","本周","生活","学习"]));
-        await persistTagLibrary();
-      }
-      state.backupPoints=Array.isArray(backupPoints)?backupPoints:[]; state.templates=Array.isArray(templates)?templates.map(function(item,index){return normalizeTemplate(item,index);}).filter(Boolean):[]; if(!Array.isArray(state.settings.recentSearches)) state.settings.recentSearches=[]; state.ready=true; maybeAutoBackup(false).catch(function(){}); emit(); return getSnapshot();
+
+      if(!Array.isArray(state.settings.recentSearches)) state.settings.recentSearches=[];
+      state.ready=true; maybeAutoBackup(false).catch(function(){}); emit(); return getSnapshot();
     }
     async function addTodo(input){
       const text=String((input&&input.text)||"").trim(); if(!text) return {ok:false,error:"请输入待办内容，空内容不能添加。"};
@@ -308,7 +353,7 @@
     async function renameList(id,name,icon){ const index=state.lists.findIndex(function(list){return list.id===id;}); if(index===-1) return {ok:false,error:"清单不存在。"}; const nextName=String(name||"").trim(); if(!nextName) return {ok:false,error:"清单名称不能为空。"}; state.lists[index]=normalizeList(Object.assign({},state.lists[index],{name:nextName,icon:icon||state.lists[index].icon}),index); await persistLists(); emit(); return {ok:true,list:state.lists[index]}; }
     async function deleteList(id){ if(state.lists.length<=1) return {ok:false,error:"至少保留一个清单。"}; const target=state.lists.find(function(list){return list.id===id;}); if(!target) return {ok:false,error:"清单不存在。"}; const fallback=state.lists.find(function(list){return list.id!==id;}); state.lists=state.lists.filter(function(list){return list.id!==id;}); let changed=false; state.todos=state.todos.map(function(todo){ if(todo.listId!==id) return todo; changed=true; return Object.assign({},todo,{listId:fallback.id,updatedAt:Date.now()}); }); if(state.settings.activeListId===id){ state.settings.activeListId="all"; await persistSettings(); } await persistLists(); if(changed) await db.putTodos(state.todos); emit(); return {ok:true,movedTo:fallback.id}; }
     async function reorderVisible(fromId,toId){ if(state.settings.sort!=="manual") return {ok:false,error:"当前不是手动排序模式。"}; const visible=getVisibleTodos(); const fromIndex=visible.findIndex(function(todo){return todo.id===fromId;}); const toIndex=visible.findIndex(function(todo){return todo.id===toId;}); if(fromIndex<0||toIndex<0||fromIndex===toIndex) return {ok:false}; const moving=visible[fromIndex]; const reordered=visible.slice(); reordered.splice(fromIndex,1); reordered.splice(toIndex,0,moving); const orderedIds=reordered.map(function(todo){return todo.id;}); const orderMap=new Map(); orderedIds.forEach(function(id,index){orderMap.set(id,(index+1)*1000);}); const rest=state.todos.filter(function(todo){return !orderMap.has(todo.id);}).sort(function(a,b){return a.order-b.order;}); rest.forEach(function(todo,index){orderMap.set(todo.id,(orderedIds.length+index+1)*1000);}); const now=Date.now(); state.todos=state.todos.map(function(todo){ return Object.assign({},todo,{order:orderMap.get(todo.id),updatedAt:now}); }); await db.putTodos(state.todos); emit(); return {ok:true}; }
-    async function exportData(){ const data=await db.exportAll(); data.version=2; data.tagLibrary=state.tagLibrary.slice(); data.lists=state.lists.slice(); return data; }
+    async function exportData(){ const data=await db.exportAll(); data.version=2; data.schemaVersion=(global.NovaSchema&&global.NovaSchema.SCHEMA_VERSION)||3; data.tagLibrary=state.tagLibrary.slice(); data.lists=state.lists.slice(); data.templates=(state.templates||[]).slice(); data.backupPoints=(state.backupPoints||[]).slice(0,8); return data; }
     async function importData(payload,mode){ const todos=Array.isArray(payload&&payload.todos)?payload.todos.map(function(item,index){return normalizeTodo(item,index,"list-inbox");}).filter(function(item){return !!item.text;}):[]; if(Array.isArray(payload&&payload.lists)&&payload.lists.length){ state.lists=payload.lists.map(function(item,index){return normalizeList(item,index);}); } else if(mode==="replace"){ state.lists=defaultLists(); } await persistLists(); await db.importAll({todos:todos,settings:payload&&payload.settings?Object.assign(defaultSettings(),payload.settings):state.settings},mode||"merge"); state.todos=await db.getAllTodos().then(function(rows){ return (rows||[]).map(function(item,index){return normalizeTodo(item,index,state.lists[0].id);}); }); state.settings=Object.assign(defaultSettings(),await db.getMeta("settings",state.settings)); if(Array.isArray(payload&&payload.tagLibrary)){ state.tagLibrary=uniqueTags(payload.tagLibrary); } else { const used=[]; state.todos.forEach(function(todo){ (todo.tags||[]).forEach(function(tag){used.push(tag);}); }); state.tagLibrary=uniqueTags(state.tagLibrary.concat(used)); } await persistTagLibrary(); emit(); return {ok:true,count:todos.length}; }
     async function createTag(name){ const tags=normalizeTags(name); if(!tags.length) return {ok:false,error:"请输入标签名。"}; const tag=tags[0]; if(state.tagLibrary.some(function(item){return item.toLowerCase()===tag.toLowerCase();})) return {ok:false,error:"标签已存在。",tag:tag}; state.tagLibrary.push(tag); state.tagLibrary=uniqueTags(state.tagLibrary).sort(function(a,b){return a.localeCompare(b,"zh-CN");}); await persistTagLibrary(); emit(); return {ok:true,tag:tag}; }
     async function deleteTag(name){ const target=String(name||"").trim(); if(!target) return {ok:false,error:"标签不存在。"}; const before=state.tagLibrary.length; state.tagLibrary=state.tagLibrary.filter(function(tag){return tag.toLowerCase()!==target.toLowerCase();}); let todosChanged=false; const now=Date.now(); state.todos=state.todos.map(function(todo){ const nextTags=(todo.tags||[]).filter(function(tag){return tag.toLowerCase()!==target.toLowerCase();}); if(nextTags.length!==(todo.tags||[]).length){ todosChanged=true; return Object.assign({},todo,{tags:nextTags,updatedAt:now}); } return todo; }); if(state.settings.activeTag&&state.settings.activeTag.toLowerCase()===target.toLowerCase()){ state.settings.activeTag=""; await persistSettings(); } await persistTagLibrary(); if(todosChanged) await db.putTodos(state.todos); emit(); return {ok:true,removedFromLibrary:before!==state.tagLibrary.length,todosChanged:todosChanged}; }

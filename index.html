@@ -27,6 +27,7 @@
         <div>
           <p class="brand__eyebrow">Nova Todo</p>
           <h1>智能待办舱</h1>
+          <p id="schema-version" class="schema-version muted">schema v3</p>
         </div>
       </div>
 
@@ -370,11 +371,26 @@
     </ul>
   </aside>
 
+  <div id="pwa-update-banner" class="pwa-update-banner" hidden>
+    <div>
+      <strong>有新版本可用</strong>
+      <p id="pwa-status" class="muted">检测到更新</p>
+    </div>
+    <div class="pwa-update-actions">
+      <button id="btn-pwa-reload" class="primary-btn" type="button">立即更新</button>
+      <button id="btn-pwa-dismiss" class="ghost-btn" type="button">稍后</button>
+    </div>
+  </div>
+
+  <div id="offline-pill" class="offline-pill" hidden>离线模式</div>
+
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
   <script src="./js/db.js"></script>
+  <script src="./js/schema.js"></script>
   <script src="./js/store.js"></script>
   <script src="./js/ui.js"></script>
+  <script src="./js/pwa.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>
