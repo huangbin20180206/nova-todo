@@ -27,7 +27,7 @@
         <div>
           <p class="brand__eyebrow">Nova Todo</p>
           <h1>智能待办舱</h1>
-          <p id="schema-version" class="schema-version muted">schema v4</p>
+          <p id="schema-version" class="schema-version muted">schema v5</p>
         </div>
       </div>
 
@@ -58,6 +58,10 @@
         </button>
         <button class="nav-item" data-view="archived" type="button">
           <span class="nav-label"><span class="nav-icon" aria-hidden="true">📦</span><span>归档</span></span><span class="nav-count" data-count="archived">0</span>
+        </button>
+        <button class="nav-item" data-view="notes" type="button">
+          <span class="nav-label"><span class="nav-icon" aria-hidden="true">📝</span><span>个人随笔</span></span>
+          <span class="nav-count" data-count="notes">0</span>
         </button>
       </nav>
 
@@ -307,6 +311,43 @@
           <button id="bulk-archive" class="ghost-btn" type="button">📦 归档</button>
           <button id="bulk-delete" class="danger-btn" type="button">删除</button>
           <button id="bulk-clear" class="ghost-btn" type="button">取消选择</button>
+        </div>
+      </section>
+
+      <section id="notes-panel" class="notes-panel" hidden aria-label="个人随笔">
+        <div class="notes-layout">
+          <div class="notes-sidebar">
+            <div class="notes-sidebar__head">
+              <strong>随笔列表</strong>
+              <button id="btn-note-new" class="primary-btn" type="button">+ 新建</button>
+            </div>
+            <div id="notes-list" class="notes-list" role="list"></div>
+            <p id="notes-empty" class="muted notes-empty" hidden>还没有随笔，写点今天的想法吧。</p>
+          </div>
+          <div class="notes-editor-card">
+            <div class="notes-editor__toolbar">
+              <input id="note-title" type="text" maxlength="120" placeholder="标题（可选，默认取正文前几字）" />
+              <select id="note-mood" aria-label="心情">
+                <option value="">心情</option>
+                <option value="😊">😊 开心</option>
+                <option value="😌">😌 平静</option>
+                <option value="🤔">🤔 思考</option>
+                <option value="🔥">🔥 干劲</option>
+                <option value="😔">😔 低落</option>
+                <option value="🎉">🎉 庆祝</option>
+              </select>
+              <input id="note-tags" type="text" maxlength="80" placeholder="标签，逗号分隔" />
+            </div>
+            <textarea id="note-body" rows="14" maxlength="20000" placeholder="写下今天的想法、灵感、复盘…支持多段文字"></textarea>
+            <div class="notes-editor__foot">
+              <span id="note-meta" class="muted">未选择随笔</span>
+              <div class="notes-editor__actions">
+                <button id="btn-note-pin" class="ghost-btn" type="button">📌 置顶</button>
+                <button id="btn-note-delete" class="danger-btn" type="button">删除</button>
+                <button id="btn-note-save" class="primary-btn" type="button">保存</button>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

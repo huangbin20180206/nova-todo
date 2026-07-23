@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
 
-  var SCHEMA_VERSION = 4;
+  var SCHEMA_VERSION = 5;
 
   function asArray(value) {
     return Array.isArray(value) ? value : [];
@@ -129,6 +129,48 @@
     todos = todos.filter(function (item) { return !isTombstoned("todo", item.id, item.updatedAt); });
     lists = lists.filter(function (item) { return !isTombstoned("list", item.id, item.updatedAt || item.createdAt); });
     templates = templates.filter(function (item) { return !isTombstoned("template", item.id, item.updatedAt || item.createdAt); });
+    // v5: personal notes / journal
+    var notes = asArray(ctx.notes);
+    if ((typeof ctx.fromVersion === "number" ? ctx.fromVersion : 0) < 5) {
+      notes = notes.map(function (item, index) {
+        if (!item || typeof item !== "object") return null;
+        var title = String(item.title || "").trim();
+        var body = String(item.body || item.content || item.text || "").trim();
+        if (!title && !body) return null;
+        if (!title) title = body.slice(0, 40) || ("随笔 " + (index + 1));
+        return {
+          id: item.id || ("note-" + Date.now() + "-" + index),
+          title: title.slice(0, 120),
+          body: body.slice(0, 20000),
+          mood: String(item.mood || "").slice(0, 16),
+          tags: asArray(item.tags).map(function (t) { return String(t || "").trim(); }).filter(Boolean).slice(0, 12),
+          pinned: !!item.pinned,
+          createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
+          updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : (typeof item.createdAt === "number" ? item.createdAt : Date.now())
+        };
+      }).filter(Boolean).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, 500);
+      log.push("migrate-to-v5-notes");
+    } else {
+      notes = notes.map(function (item, index) {
+        if (!item || typeof item !== "object") return null;
+        var title = String(item.title || "").trim();
+        var body = String(item.body || "").trim();
+        if (!title && !body) return null;
+        if (!title) title = body.slice(0, 40) || ("随笔 " + (index + 1));
+        return {
+          id: item.id || ("note-" + Date.now() + "-" + index),
+          title: title.slice(0, 120),
+          body: body.slice(0, 20000),
+          mood: String(item.mood || "").slice(0, 16),
+          tags: asArray(item.tags).map(function (t) { return String(t || "").trim(); }).filter(Boolean).slice(0, 12),
+          pinned: !!item.pinned,
+          createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
+          updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
+        };
+      }).filter(Boolean).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, 500);
+    }
+    notes = notes.filter(function (item) { return !isTombstoned("note", item.id, item.updatedAt); });
+
 
     return {
       version: SCHEMA_VERSION,
@@ -139,6 +181,7 @@
       templates: templates,
       backupPoints: backupPoints,
       tombstones: tombstones,
+      notes: notes,
       log: log,
       migrated: log.length > 0 || (typeof ctx.fromVersion === "number" ? ctx.fromVersion : 0) < SCHEMA_VERSION
     };

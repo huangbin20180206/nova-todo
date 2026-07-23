@@ -71,8 +71,25 @@ function assert(cond, msg){ if(!cond) throw new Error(msg); }
   snap = store.getSnapshot();
   assert(!!snap.settings.calendarAnchor, 'calendar shifted');
 
+  // notes journal
+  const n1 = await store.addNote({ title: "今日复盘", body: "完成随笔功能", mood: "🔥", tags: ["开发"] });
+  assert(n1.ok, "create note");
+  await store.setSettings({ view: "notes", search: "随笔" });
+  snap = store.getSnapshot();
+  assert(snap.settings.view === "notes", "notes view");
+  assert((snap.visibleNotes||[]).some(n => n.id === n1.note.id), "notes search");
+  const n2 = await store.updateNote(n1.note.id, { body: "完成随笔功能并同步", pinned: true });
+  assert(n2.ok && n2.note.pinned, "update/pin note");
+  const n3 = await store.toggleNotePin(n1.note.id);
+  assert(n3.ok && !n3.note.pinned, "toggle pin note");
+  await store.deleteNote(n1.note.id);
+  snap = store.getSnapshot();
+  assert(!(snap.notes||[]).some(n => n.id === n1.note.id), "note deleted");
+  assert((snap.tombstones||[]).some(t => t.entity === "note" && t.id === n1.note.id), "note tombstone");
+  await store.setSettings({ view: "all", search: "" });
+
   await store.deleteTodo(created.todo.id);
   snap = store.getSnapshot();
   assert((snap.tombstones||[]).some(t => t.id === created.todo.id), 'todo tombstone');
-  console.log(JSON.stringify({ ok:true, schemaVersion: snap.schemaVersion, todos: snap.todos.length, tombstones: snap.tombstones.length, calendar: snap.calendar && snap.calendar.mode }, null, 2));
+  console.log(JSON.stringify({ ok:true, schemaVersion: snap.schemaVersion, todos: snap.todos.length, tombstones: snap.tombstones.length, calendar: snap.calendar && snap.calendar.mode, notes: (snap.notes||[]).length }, null, 2));
 })().catch(err => { console.error('FAIL', err); process.exit(1); });

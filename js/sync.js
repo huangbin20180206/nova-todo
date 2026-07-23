@@ -131,6 +131,7 @@
     const todos = mergeCollections(local.todos || [], remote.todos || [], tombstones, "todo", conflicts);
     const lists = mergeCollections(local.lists || [], remote.lists || [], tombstones, "list", conflicts);
     const templates = mergeCollections(local.templates || [], remote.templates || [], tombstones, "template", conflicts);
+    const notes = mergeCollections(local.notes || [], remote.notes || [], tombstones, "note", conflicts);
     const tagLibrary = Array.from(new Set([].concat(local.tagLibrary || [], remote.tagLibrary || [])));
     const localSettings = Object.assign({}, local.settings || {});
     const remoteSettings = Object.assign({}, remote.settings || {});
@@ -142,12 +143,13 @@
     return {
       version: 2,
       type: "nova-todo-sync",
-      schemaVersion: Math.max(remote.schemaVersion || 0, local.schemaVersion || 0, 4),
+      schemaVersion: Math.max(remote.schemaVersion || 0, local.schemaVersion || 0, 5),
       exportedAt: nowIso(),
       updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0, Date.now()),
       todos: todos,
       lists: lists,
       templates: templates,
+      notes: notes,
       tagLibrary: tagLibrary,
       tombstones: tombstones,
       settings: mergedSettings,
@@ -177,6 +179,7 @@
       todos: snapshot.todos || [],
       lists: snapshot.lists || [],
       templates: snapshot.templates || [],
+      notes: snapshot.notes || [],
       tagLibrary: snapshot.tagLibrary || [],
       tombstones: snapshot.tombstones || [],
       settings: stripSecrets(snapshot.settings || {})

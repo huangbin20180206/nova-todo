@@ -26,6 +26,7 @@
     overdue: { label: "已逾期", icon: "⏰" },
     scheduled: { label: "重复任务", icon: "🔁" },
     archived: { label: "归档", icon: "📦" },
+    notes: { label: "个人随笔", icon: "📝" },
   };
   const REPEAT_META = {
     none: { label: "不重复", icon: "🚫" },
@@ -216,6 +217,18 @@
       progressFill: $("#daily-progress-fill"),
       progressLabel: $("#daily-progress-label"),
       btnScrollTop: $("#btn-scroll-top"),
+      notesPanel: $("#notes-panel"),
+      notesList: $("#notes-list"),
+      notesEmpty: $("#notes-empty"),
+      btnNoteNew: $("#btn-note-new"),
+      noteTitle: $("#note-title"),
+      noteMood: $("#note-mood"),
+      noteTags: $("#note-tags"),
+      noteBody: $("#note-body"),
+      noteMeta: $("#note-meta"),
+      btnNotePin: $("#btn-note-pin"),
+      btnNoteDelete: $("#btn-note-delete"),
+      btnNoteSave: $("#btn-note-save"),
       toastStack: $("#toast-stack"),
     };
 
@@ -223,6 +236,8 @@
     let editorSelectedTags = [];
     let editorSubtasks = [];
     let latestSnapshot = null;
+    let activeNoteId = null;
+    let noteDirty = false;
     let renderRaf = 0;
     let pendingSnapshot = null;
     let lastUiSig = "";
@@ -1479,7 +1494,161 @@
       if (typeof calFrag !== "undefined") els.calendarBoard.appendChild(calFrag);
     }
 
+    function formatNoteTime(ts) {
+      if (!ts) return "";
+      try {
+        const d = new Date(ts);
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mi = String(d.getMinutes()).padStart(2, "0");
+        return mm + "-" + dd + " " + hh + ":" + mi;
+      } catch (e) { return ""; }
+    }
+
+    function getActiveNote(snapshot) {
+      const list = (snapshot && (snapshot.visibleNotes || snapshot.notes)) || [];
+      if (!list.length) return null;
+      if (activeNoteId) {
+        const hit = list.find(function (n) { return n.id === activeNoteId; });
+        if (hit) return hit;
+      }
+      return list[0];
+    }
+
+    function fillNoteEditor(note, force) {
+      if (!els.noteTitle) return;
+      if (!force && noteDirty) return;
+      if (!note) {
+        activeNoteId = null;
+        els.noteTitle.value = "";
+        if (els.noteMood) els.noteMood.value = "";
+        if (els.noteTags) els.noteTags.value = "";
+        if (els.noteBody) els.noteBody.value = "";
+        if (els.noteMeta) els.noteMeta.textContent = "未选择随笔";
+        if (els.btnNotePin) els.btnNotePin.textContent = "📌 置顶";
+        noteDirty = false;
+        return;
+      }
+      activeNoteId = note.id;
+      els.noteTitle.value = note.title || "";
+      if (els.noteMood) els.noteMood.value = note.mood || "";
+      if (els.noteTags) els.noteTags.value = (note.tags || []).join(", ");
+      if (els.noteBody) els.noteBody.value = note.body || "";
+      if (els.noteMeta) {
+        els.noteMeta.textContent = "更新 " + formatNoteTime(note.updatedAt) + " · 创建 " + formatNoteTime(note.createdAt) + (note.pinned ? " · 已置顶" : "");
+      }
+      if (els.btnNotePin) els.btnNotePin.textContent = note.pinned ? "📌 取消置顶" : "📌 置顶";
+      noteDirty = false;
+    }
+
+    function collectNoteForm() {
+      const title = (els.noteTitle && els.noteTitle.value || "").trim();
+      const body = (els.noteBody && els.noteBody.value || "").trim();
+      const mood = els.noteMood ? els.noteMood.value : "";
+      const tags = store.normalizeTags ? store.normalizeTags(els.noteTags ? els.noteTags.value : "") : String(els.noteTags && els.noteTags.value || "").split(/[,，]/).map(function (s) { return s.trim(); }).filter(Boolean);
+      return { title: title, body: body, mood: mood, tags: tags };
+    }
+
+    function renderNotesPanel(snapshot) {
+      if (!els.notesPanel) return;
+      const isNotes = snapshot.settings.view === "notes";
+      document.body.classList.toggle("is-notes-view", isNotes);
+      els.notesPanel.hidden = !isNotes;
+      if (!isNotes) return;
+
+      // hide task chrome
+      if (els.board) els.board.hidden = true;
+      if (els.calendarBoard) els.calendarBoard.hidden = true;
+      if (els.calendarToolbar) els.calendarToolbar.hidden = true;
+      if (els.bulkBar) els.bulkBar.hidden = true;
+      if (els.focusPanel) els.focusPanel.hidden = true;
+      if (els.emptyState) els.emptyState.hidden = true;
+      const composer = document.querySelector(".composer-panel");
+      if (composer) composer.hidden = true;
+
+      const list = snapshot.visibleNotes || snapshot.notes || [];
+      if (els.notesList) {
+        els.notesList.innerHTML = "";
+        const frag = document.createDocumentFragment();
+        list.forEach(function (note) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "note-item" + (note.id === activeNoteId ? " is-active" : "");
+          btn.setAttribute("role", "listitem");
+          const title = document.createElement("div");
+          title.className = "note-item__title";
+          title.innerHTML = (note.pinned ? "📌 " : "") + (note.mood ? (note.mood + " ") : "") + "<span></span>";
+          title.querySelector("span").textContent = note.title || "未命名随笔";
+          const preview = document.createElement("div");
+          preview.className = "note-item__preview";
+          preview.textContent = (note.body || "").replace(/\s+/g, " ").slice(0, 100) || "（无正文）";
+          const meta = document.createElement("div");
+          meta.className = "note-item__meta";
+          meta.textContent = formatNoteTime(note.updatedAt) + ((note.tags && note.tags.length) ? (" · " + note.tags.slice(0, 3).join(" ")) : "");
+          btn.appendChild(title);
+          btn.appendChild(preview);
+          btn.appendChild(meta);
+          btn.addEventListener("click", function () {
+            if (noteDirty && activeNoteId && activeNoteId !== note.id) {
+              if (!confirm("当前随笔有未保存修改，切换将丢弃改动。继续？")) return;
+            }
+            activeNoteId = note.id;
+            noteDirty = false;
+            fillNoteEditor(note, true);
+            renderNotesPanel(latestSnapshot || snapshot);
+          });
+          frag.appendChild(btn);
+        });
+        els.notesList.appendChild(frag);
+      }
+      if (els.notesEmpty) els.notesEmpty.hidden = list.length > 0;
+
+      const active = getActiveNote(snapshot);
+      if (active) {
+        if (!activeNoteId) activeNoteId = active.id;
+        fillNoteEditor(active, false);
+      } else if (!noteDirty) {
+        fillNoteEditor(null, true);
+      }
+
+      if (els.resultMeta) els.resultMeta.textContent = list.length + " 篇随笔";
+      if (els.viewTitle) els.viewTitle.textContent = "📝 个人随笔";
+      if (els.viewSubtitle) {
+        const parts = ["本地 IndexedDB · 支持云同步"];
+        if (snapshot.settings.search) parts.push("搜索 “" + snapshot.settings.search + "”");
+        els.viewSubtitle.textContent = parts.join(" · ");
+      }
+    }
+
+    async function saveActiveNote() {
+      const form = collectNoteForm();
+      if (!form.title && !form.body) {
+        toast("请输入标题或正文", "error");
+        return;
+      }
+      if (activeNoteId) {
+        const result = await store.updateNote(activeNoteId, form);
+        if (!result.ok) { toast(result.error || "保存失败", "error"); return; }
+        noteDirty = false;
+        activeNoteId = result.note.id;
+        toast("随笔已保存");
+      } else {
+        const result = await store.addNote(form);
+        if (!result.ok) { toast(result.error || "创建失败", "error"); return; }
+        noteDirty = false;
+        activeNoteId = result.note.id;
+        toast("随笔已创建");
+      }
+    }
+
     function renderBoard(snapshot) {
+      if (snapshot.settings.view === "notes") {
+        if (els.board) { els.board.hidden = true; els.board.innerHTML = ""; }
+        return;
+      }
+      const composer = document.querySelector(".composer-panel");
+      if (composer) composer.hidden = false;
       const list = snapshot.visibleTodos || [];
       const isCal = snapshot.settings.view === "week" || snapshot.settings.view === "month";
       if (els.board) els.board.hidden = !!isCal;
@@ -1581,6 +1750,10 @@
         (snapshot.templates || []).map(function (t) { return t.id + ":" + (t.updatedAt || t.name); }).join("|"),
         (snapshot.recentSearches || []).join("|"),
         (snapshot.backupPoints || []).map(function (b) { return b.id + ":" + b.createdAt; }).join("|"),
+        (snapshot.visibleNotes || snapshot.notes || []).map(function (n) {
+          return [n.id, n.updatedAt, n.pinned, n.title, (n.tags||[]).join(","), (n.body||"").length].join(":");
+        }).join("|"),
+        activeNoteId || "",
         JSON.stringify(snapshot.syncStatus || {})
       ].join("::");
     }
@@ -1632,6 +1805,7 @@
       renderTags(snapshot);
       renderStats(snapshot);
       renderBulkBar(snapshot);
+      renderNotesPanel(snapshot);
       renderBoard(snapshot);
       if (!els.drawer.hidden) {
         renderEditorTagPicker();
@@ -2317,6 +2491,56 @@
         });
       }
 
+      function markNoteDirty() { noteDirty = true; }
+      if (els.noteTitle) els.noteTitle.addEventListener("input", markNoteDirty);
+      if (els.noteBody) els.noteBody.addEventListener("input", markNoteDirty);
+      if (els.noteMood) els.noteMood.addEventListener("change", markNoteDirty);
+      if (els.noteTags) els.noteTags.addEventListener("input", markNoteDirty);
+      if (els.btnNoteNew) {
+        els.btnNoteNew.addEventListener("click", function () {
+          if (noteDirty && (els.noteBody && els.noteBody.value.trim() || els.noteTitle && els.noteTitle.value.trim())) {
+            if (!confirm("当前内容未保存，确定新建空白随笔？")) return;
+          }
+          activeNoteId = null;
+          noteDirty = false;
+          fillNoteEditor(null, true);
+          if (els.noteTitle) els.noteTitle.focus();
+          toast("开始写新随笔");
+        });
+      }
+      if (els.btnNoteSave) els.btnNoteSave.addEventListener("click", function () { saveActiveNote(); });
+      if (els.btnNoteDelete) {
+        els.btnNoteDelete.addEventListener("click", function () {
+          if (!activeNoteId) { toast("没有可删除的随笔", "error"); return; }
+          if (!confirm("确定删除这篇随笔？")) return;
+          store.deleteNote(activeNoteId).then(function (result) {
+            if (!result.ok) toast(result.error || "删除失败", "error");
+            else {
+              activeNoteId = null;
+              noteDirty = false;
+              toast("随笔已删除");
+            }
+          });
+        });
+      }
+      if (els.btnNotePin) {
+        els.btnNotePin.addEventListener("click", function () {
+          if (!activeNoteId) { toast("请先保存随笔", "error"); return; }
+          store.toggleNotePin(activeNoteId).then(function (result) {
+            if (!result.ok) toast(result.error || "操作失败", "error");
+            else toast(result.note && result.note.pinned ? "已置顶" : "已取消置顶");
+          });
+        });
+      }
+      // Ctrl+S save note in notes view
+      document.addEventListener("keydown", function (event) {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        if (!(event.key === "s" || event.key === "S")) return;
+        if (!latestSnapshot || latestSnapshot.settings.view !== "notes") return;
+        event.preventDefault();
+        saveActiveNote();
+      });
+
       document.addEventListener("keydown", function (event) {
         const tag = (event.target && event.target.tagName) || "";
         const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (event.target && event.target.isContentEditable);
@@ -2357,7 +2581,12 @@
         if (typing) return;
         if (event.key === "n" || event.key === "N") {
           event.preventDefault();
-          openEditor(null);
+          if (latestSnapshot && latestSnapshot.settings.view === "notes") {
+            if (els.btnNoteNew) els.btnNoteNew.click();
+            else if (els.noteBody) els.noteBody.focus();
+          } else {
+            openEditor(null);
+          }
         } else if (event.key === "/") {
           event.preventDefault();
           if (els.searchInput) els.searchInput.focus();

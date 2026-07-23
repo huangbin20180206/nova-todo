@@ -1,4 +1,4 @@
-const CACHE = "nova-todo-v9";
+const CACHE = "nova-todo-v10";
 const ASSETS = [
   "./",
   "./index.html",
