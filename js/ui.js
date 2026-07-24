@@ -143,6 +143,7 @@
       btnSidebarClose: $("#btn-sidebar-close"),
       sidebar: $("#sidebar"),
       sidebarBackdrop: $("#sidebar-backdrop"),
+      dataSafetyMeta: $("#data-safety-meta"),
       backupMeta: $("#backup-meta"),
       backupSelect: $("#backup-select"),
       btnBackupNow: $("#btn-backup-now"),
@@ -158,6 +159,7 @@
       recentSearches: $("#recent-searches"),
       syncPanel: $("#sync-panel"),
       syncMeta: $("#sync-meta"),
+      syncAdvanced: $("#sync-advanced"),
       syncEnabled: $("#sync-enabled"),
       syncProvider: $("#sync-provider"),
       syncToken: $("#sync-token"),
@@ -345,10 +347,18 @@
       }
     }
     function renderBackupPanel(snapshot) {
-      if (!els.backupMeta && !els.backupSelect) return;
+      if (!els.backupMeta && !els.backupSelect && !els.dataSafetyMeta) return;
       const points = (snapshot && snapshot.backupPoints) || [];
+      const todoCount = ((snapshot && snapshot.todos) || []).length;
+      const noteCount = (snapshot && typeof snapshot.notesCount === "number")
+        ? snapshot.notesCount
+        : (((snapshot && snapshot.notes) || []).length);
+      if (els.dataSafetyMeta) {
+        const lastBackup = points.length ? formatBackupTime(points[0].createdAt) : "尚无本机备份点";
+        els.dataSafetyMeta.textContent = "本机已保存 " + todoCount + " 条任务 · " + noteCount + " 篇随笔 · 最近备份 " + lastBackup + "。默认不上传。";
+      }
       if (els.backupMeta) {
-        if (!points.length) els.backupMeta.textContent = "尚未创建备份（建议开启后定期备份）";
+        if (!points.length) els.backupMeta.textContent = "尚未创建本机备份点（建议每周下载一次完整备份）";
         else els.backupMeta.textContent = "最近备份：" + formatBackupTime(points[0].createdAt) + " · 共 " + points.length + " 个恢复点";
       }
       if (els.backupSelect) {
@@ -576,17 +586,28 @@
       if (els.syncEndpointWrap) els.syncEndpointWrap.hidden = provider !== "http";
       if (els.syncMeta) {
         const bits = [];
-        bits.push(sync.enabled ? "已开启" : "未开启");
-        bits.push(provider === "http" ? "HTTP" : "Gist");
-        if (provider === "gist" && sync.remoteId) bits.push("ID " + sync.remoteId.slice(0, 10) + (sync.remoteId.length > 10 ? "…" : ""));
-        if (provider === "http" && sync.endpoint) bits.push("已配置 Endpoint");
-        bits.push("上次同步：" + formatSyncTime(sync.lastSyncedAt));
-        if (sync.lastResult) bits.push(sync.lastResult);
-        const tombCount = Array.isArray(snapshot && snapshot.tombstones) ? snapshot.tombstones.length : (sync.tombstoneCount || 0);
-        if (tombCount) bits.push("删除标记 " + tombCount);
-        const conflictCount = Array.isArray(sync.lastConflicts) ? sync.lastConflicts.length : 0;
-        if (conflictCount) bits.push("冲突 " + conflictCount);
+        if (!sync.enabled) {
+          bits.push("未开启");
+          bits.push("数据仅本机");
+          bits.push("需要跨设备时再配置");
+        } else {
+          bits.push("已开启");
+          bits.push(provider === "http" ? "HTTP" : "Gist");
+          bits.push(sync.hasToken ? "密钥仅本机" : "待填写 Token");
+          if (provider === "gist" && sync.remoteId) bits.push("ID " + sync.remoteId.slice(0, 10) + (sync.remoteId.length > 10 ? "…" : ""));
+          if (provider === "http" && sync.endpoint) bits.push("已配置 Endpoint");
+          bits.push("上次同步：" + formatSyncTime(sync.lastSyncedAt));
+          if (sync.lastResult) bits.push(sync.lastResult);
+          const tombCount = Array.isArray(snapshot && snapshot.tombstones) ? snapshot.tombstones.length : (sync.tombstoneCount || 0);
+          if (tombCount) bits.push("删除标记 " + tombCount);
+          const conflictCount = Array.isArray(sync.lastConflicts) ? sync.lastConflicts.length : 0;
+          if (conflictCount) bits.push("冲突 " + conflictCount);
+        }
         els.syncMeta.textContent = bits.join(" · ");
+      }
+      // auto-expand advanced form when sync is already enabled
+      if (els.syncAdvanced) {
+        if (sync.enabled || sync.hasToken || sync.remoteId || sync.endpoint) els.syncAdvanced.open = true;
       }
       // conflicts list
       if (els.syncConflicts && els.syncConflictList) {
@@ -2301,7 +2322,7 @@
           a.download = "nova-todo-share-" + store.todayKey() + ".json";
           a.click();
           URL.revokeObjectURL(url);
-          toast("分享包已导出，可发给朋友导入");
+          toast("分享包已导出（不含密钥，适合发给别人）");
         });
       }
 
@@ -2314,7 +2335,9 @@
           a.download = "nova-todo-export-" + store.todayKey() + ".json";
           a.click();
           URL.revokeObjectURL(url);
-          toast("导出完成");
+          const todoCount = Array.isArray(data && data.todos) ? data.todos.length : 0;
+          const noteCount = Array.isArray(data && data.notes) ? data.notes.length : 0;
+          toast("完整备份已下载（" + todoCount + " 任务 / " + noteCount + " 随笔，不含 Token）");
         });
       });
 
@@ -2329,9 +2352,10 @@
         reader.onload = function () {
           try {
             const payload = JSON.parse(String(reader.result || "{}"));
-            const mode = confirm("点击“确定”覆盖导入，点击“取消”合并导入。") ? "replace" : "merge";
+            const mode = confirm("点击“确定”覆盖导入（本机现有数据会被替换），点击“取消”合并导入（保留两边数据）。") ? "replace" : "merge";
             store.importData(payload, mode).then(function (result) {
-              toast("导入完成，处理 " + result.count + " 条任务");
+              const count = result && typeof result.count === "number" ? result.count : 0;
+              toast((mode === "replace" ? "覆盖恢复完成" : "合并导入完成") + "，处理 " + count + " 条任务");
             });
           } catch (error) {
             toast("导入失败：JSON 无法解析", "error");

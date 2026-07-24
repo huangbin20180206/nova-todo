@@ -125,77 +125,104 @@
 
       <div class="sidebar__footer">
         <button id="btn-enable-notify" class="ghost-btn" type="button">开启浏览器提醒</button>
-        <button id="btn-share-pack" class="ghost-btn" type="button">导出分享包</button>
-        <button id="btn-export" class="ghost-btn" type="button">导出 JSON</button>
-        <button id="btn-import" class="ghost-btn" type="button">导入 JSON</button>
-        <input id="import-file" type="file" accept="application/json,.json" hidden />
+
+        <div id="data-safety-panel" class="backup-panel data-safety-panel">
+          <p class="backup-panel__title">数据保险箱</p>
+          <p id="data-safety-meta" class="backup-meta muted">默认只保存在你这台设备的浏览器本地，不上传、不共享给其他用户。</p>
+          <ul class="safety-points">
+            <li><strong>本机优先</strong>：任务/随笔写在浏览器 IndexedDB，换账号登录网站也互不影响。</li>
+            <li><strong>隐私默认</strong>：导出文件不会包含 Token；云同步密钥只留在本机。</li>
+            <li><strong>建议动作</strong>：每周下载一次完整备份，换手机/换浏览器时再导入。</li>
+          </ul>
+          <div class="backup-actions">
+            <button id="btn-export" class="primary-btn" type="button">下载完整备份</button>
+            <button id="btn-import" class="ghost-btn" type="button">导入恢复</button>
+            <button id="btn-share-pack" class="ghost-btn" type="button">导出分享包</button>
+          </div>
+          <p class="field-hint">完整备份：给自己换设备用。分享包：可发给别人，不含同步密钥。导入时可选择覆盖或合并。</p>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+        </div>
+
+        <div id="backup-panel" class="backup-panel">
+          <p class="backup-panel__title">本机自动备份</p>
+          <p id="backup-meta" class="backup-meta muted">尚未创建备份</p>
+          <p class="field-hint">自动在本机留下恢复点，误删可回退；仍建议再下载一份到网盘/电脑。</p>
+          <div class="backup-actions">
+            <button id="btn-backup-now" class="ghost-btn" type="button">立即备份</button>
+            <button id="btn-backup-restore" class="ghost-btn" type="button">恢复备份</button>
+            <button id="btn-backup-download" class="ghost-btn" type="button">下载备份点</button>
+          </div>
+          <select id="backup-select" class="backup-select" aria-label="选择备份点"></select>
+        </div>
+
         <div id="sync-panel" class="sync-panel">
-          <p class="backup-panel__title">云同步协作</p>
-          <p id="sync-meta" class="backup-meta muted">未配置。推荐 GitHub Gist（免费、可跨设备）。</p>
+          <p class="backup-panel__title">跨设备同步（可选）</p>
+          <p id="sync-meta" class="backup-meta muted">未开启。适合你自己多台设备；普通使用先靠“下载完整备份”即可。</p>
+          <div class="safety-callout">
+            <strong>安全说明</strong>
+            <span>Token 只存在本机，不会写进备份/导出文件。远端只存你的任务快照；不配 Token 就不会上传任何数据。</span>
+          </div>
           <label class="sync-field"><span>开关</span>
             <select id="sync-enabled">
               <option value="off">关闭</option>
               <option value="on">开启</option>
             </select>
           </label>
-          <label class="sync-field"><span>提供方</span>
-            <select id="sync-provider">
-              <option value="gist">GitHub Gist</option>
-              <option value="http">通用 HTTP</option>
-            </select>
-          </label>
-          <label class="sync-field"><span>Token</span>
-            <input id="sync-token" type="password" autocomplete="off" placeholder="GitHub PAT / Bearer Token" />
-          </label>
-          <label class="sync-field" id="sync-remote-wrap"><span>Gist ID</span>
-            <input id="sync-remote-id" type="text" autocomplete="off" placeholder="可空：首次推送自动创建" />
-          </label>
-          <label class="sync-field" id="sync-endpoint-wrap" hidden><span>Endpoint</span>
-            <input id="sync-endpoint" type="text" autocomplete="off" placeholder="https://example.com/nova-todo-sync" />
-          </label>
-          <label class="sync-field"><span>自动同步</span>
-            <select id="sync-autosync">
-              <option value="off">手动</option>
-              <option value="1">1 分钟（更实时）</option>
-              <option value="5">5 分钟</option>
-              <option value="15">15 分钟</option>
-            </select>
-          </label>
-          <div class="backup-actions">
-            <button id="btn-sync-now" class="primary-btn" type="button">立即同步</button>
-            <button id="btn-sync-push" class="ghost-btn" type="button">仅推送</button>
-            <button id="btn-sync-pull" class="ghost-btn" type="button">仅拉取</button>
-            <button id="btn-sync-save" class="ghost-btn" type="button">保存配置</button>
-          </div>
-          <div id="sync-conflicts" class="sync-conflicts" hidden>
-            <p class="backup-panel__title">最近冲突（LWW 已自动取最新）</p>
-            <div id="sync-conflict-list" class="sync-conflict-list"></div>
-          </div>
-          <div class="tombstone-panel">
-            <p class="backup-panel__title">删除标记（tombstone）</p>
-            <p id="tombstone-meta" class="backup-meta muted">暂无删除标记</p>
-            <div class="backup-actions">
-              <button id="btn-tombstone-prune" class="ghost-btn" type="button">清理过期</button>
-              <button id="btn-tombstone-clear" class="ghost-btn" type="button">清空全部</button>
+          <details id="sync-advanced" class="sync-advanced">
+            <summary>展开配置（GitHub Gist / HTTP）</summary>
+            <div class="sync-advanced__body">
+              <p class="field-hint">3 步：① 创建 GitHub Token（gist 权限）② 粘贴到下方 ③ 点“立即同步”。Gist ID 可留空，首次会自动创建。</p>
+              <label class="sync-field"><span>提供方</span>
+                <select id="sync-provider">
+                  <option value="gist">GitHub Gist（推荐）</option>
+                  <option value="http">通用 HTTP</option>
+                </select>
+              </label>
+              <label class="sync-field"><span>Token</span>
+                <input id="sync-token" type="password" autocomplete="off" placeholder="仅保存在本机，不会导出" />
+              </label>
+              <label class="sync-field" id="sync-remote-wrap"><span>Gist ID</span>
+                <input id="sync-remote-id" type="text" autocomplete="off" placeholder="可空：首次推送自动创建" />
+              </label>
+              <label class="sync-field" id="sync-endpoint-wrap" hidden><span>Endpoint</span>
+                <input id="sync-endpoint" type="text" autocomplete="off" placeholder="https://example.com/nova-todo-sync" />
+              </label>
+              <label class="sync-field"><span>自动同步</span>
+                <select id="sync-autosync">
+                  <option value="off">手动</option>
+                  <option value="1">1 分钟（更实时）</option>
+                  <option value="5">5 分钟</option>
+                  <option value="15">15 分钟</option>
+                </select>
+              </label>
+              <div class="backup-actions">
+                <button id="btn-sync-now" class="primary-btn" type="button">立即同步</button>
+                <button id="btn-sync-push" class="ghost-btn" type="button">仅推送</button>
+                <button id="btn-sync-pull" class="ghost-btn" type="button">仅拉取</button>
+                <button id="btn-sync-save" class="ghost-btn" type="button">保存配置</button>
+              </div>
+              <div id="sync-conflicts" class="sync-conflicts" hidden>
+                <p class="backup-panel__title">最近冲突（已自动保留最新版）</p>
+                <div id="sync-conflict-list" class="sync-conflict-list"></div>
+              </div>
+              <div class="tombstone-panel">
+                <p class="backup-panel__title">删除标记</p>
+                <p id="tombstone-meta" class="backup-meta muted">暂无删除标记</p>
+                <div class="backup-actions">
+                  <button id="btn-tombstone-prune" class="ghost-btn" type="button">清理过期</button>
+                  <button id="btn-tombstone-clear" class="ghost-btn" type="button">清空全部</button>
+                </div>
+              </div>
+              <p class="field-hint">同步前会自动做本机备份。多人共用同一 Gist 才是协作；个人跨设备请用自己的 Gist。</p>
             </div>
-          </div>
-          <p class="field-hint">Token 只存在本机 IndexedDB，不会上传到远端快照。同步前会自动做本地备份。删除会跨设备保留（tombstone）。开启自动同步后，会在回到页面/联网/本地变更时更积极同步。多人共用同一 Gist ID + 各自 Token 即可协作。</p>
+          </details>
         </div>
+
         <div id="template-panel" class="template-panel">
           <p class="backup-panel__title">任务模板</p>
           <p class="backup-meta muted">一键套用周报、复盘等高频任务</p>
           <div id="template-list" class="template-list"></div>
           <button id="btn-save-template" class="ghost-btn" type="button">从当前编辑器/选中任务存模板</button>
-        </div>
-        <div id="backup-panel" class="backup-panel">
-          <p class="backup-panel__title">自动备份</p>
-          <p id="backup-meta" class="backup-meta muted">尚未创建备份</p>
-          <div class="backup-actions">
-            <button id="btn-backup-now" class="ghost-btn" type="button">立即备份</button>
-            <button id="btn-backup-restore" class="ghost-btn" type="button">恢复备份</button>
-            <button id="btn-backup-download" class="ghost-btn" type="button">下载备份</button>
-          </div>
-          <select id="backup-select" class="backup-select" aria-label="选择备份点"></select>
         </div>
       </div>
     </aside>
